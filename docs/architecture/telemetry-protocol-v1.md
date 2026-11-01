@@ -1,23 +1,24 @@
-# ONYX CORE telemetry wire contract — proposal v1
+# ONYX CORE telemetry protocol v1 — implemented prototype contract
 
-Status: **DRAFT for review, not implemented**. Related [Issue #5](https://github.com/OnyxJeff/onyx-core/issues/5).
+Tracking: [Issue #5](https://github.com/OnyxJeff/onyx-core/issues/5). Status: **prototype tested offline on Pi Zero (14/14 tests); no real host-to-Pi request or persistent service validated yet**.
 
-## Transport
+## Transport and trust boundary
 
-HTTP over the dedicated SQUALL ↔ Pi USB RNDIS network only; never bind receiver to all interfaces. Resolve `svr-onyxcore.local`, and confirm the address belongs to the currently connected USB subnet before use. Initial port proposal: **8765/TCP** (matches legacy receiver; no assumption that a listener exists). Never expose via pfSense, port forwarding, reverse proxy, or home LAN.
+HTTP port 8765 over SQUALL ↔ Pi USB RNDIS. Receiver **must bind to the Pi's actual current USB ICS IPv4 address**, not 0.0.0.0; observed address 192.168.137.167 is a DHCP lease and is **not reserved**. Windows should resolve `svr-onyxcore.local` and confirm that it resolves to the Pi USB address. No LAN exposure, proxy or port forwarding. HTTP bearer tokens are not encrypted; this is a local-link assumption, not confidentiality against host compromise or other USB-link peers.
 
-## Endpoints
+## API
 
-- `GET /healthz`: bounded, unauthenticated liveness response. Should reveal no secrets or detailed host information.
-- `POST /api/v1/telemetry`: require header `Authorization: Bearer <token>`, compare securely, validate Content-Type `application/json`, body at most **8 KiB**, schema version `1`. Reject unauthorized, malformed, or oversized requests without logging secrets.
-- Response success: `202 Accepted`, including short safe acknowledgement. Errors use predictable 400/401/413/415/422 semantics. No user-controlled dynamic routes.
+- `GET /healthz`: 200 `{"status":"ok"}`, no secret required.
+- `POST /api/v1/telemetry`: `Authorization: Bearer <secret>`, exact `Content-Type: application/json`, explicit unique decimal `Content-Length` at most 8192 bytes, no Transfer-Encoding.
+- Successful new sample: 202 Accepted. Absent/wrong auth: 401. Wrong content type: 415. Missing/malformed length or transfer encoding: 400. Oversize: 413. Schema/clock/JSON violations: 422. Duplicate or out-of-order: 409. Storage failures: 503. Unrecognized path: 404.
 
-## Example envelope (synthetic, no real machine data)
+## Envelope (synthetic example)
 
 ```json
 {
   "schema_version": 1,
   "source": "SQUALL",
+  "session_id": "6130c58d-9807-4f07-b6fb-5eb5c97247c0",
   "timestamp_utc": "2026-11-01T21:00:00Z",
   "sequence": 1,
   "metrics": {
@@ -28,21 +29,31 @@ HTTP over the dedicated SQUALL ↔ Pi USB RNDIS network only; never bind receive
 }
 ```
 
-## Validation and semantics
+**Always generate timestamp dynamically from UTC during real testing.** The static example above will be rejected after the freshness window.
 
-- Enforce exact allowed fields, bounded string lengths and valid UTC timestamps; reject NaN, Infinity, negative uptime or percentages outside 0–100.
-- Accept each sequence number once per source where feasible; define monotonic behavior across Windows restarts before coding.
-- Define staleness using receiver monotonic time for recent arrivals, and UTC timestamps for source measurements. Clock skew must not silently create valid-looking fresh samples.
-- Keep at most the latest valid snapshot on disk (atomic write), plus limited structured service logs. No bulk history in v0.2.0.
-- Windows collector uses one in-flight send, bounded timeout, jittered/backoff retries, and no unlimited disk queue. If USB is unavailable, service stays healthy and resumes when transport returns.
-- Authentication is a token, not encrypted transport; the USB link is a local trust boundary. Do not claim confidentiality against a compromised Windows host. A compromised Windows host can read its own token.
-- Decide actual token distribution, key rotation and filesystem ACLs during security design review; never embed a real token in a repository or public log.
+- `schema_version`: integer exactly 1.
+- `source`: string exactly `SQUALL` for this milestone.
+- `session_id`: canonical lowercase UUID; fresh per collector process session.
+- `sequence`: positive integer from 1 through 2^63 − 1, increasing within a session.
+- `timestamp_utc`: ISO 8601 UTC with trailing Z; at most 40 characters; within ±5 minutes of receiver's current UTC clock for incoming requests.
+- Percentages: finite JSON numbers in 0–100; bools not accepted. Uptime: nonnegative integer. No missing or additional fields.
+- Snapshot: latest valid envelope only, stored by atomic file replacement with mode 0600; disk state is read back without applying the live ±5-minute clock filter.
 
-## Open design decisions
+## Replay and restart behavior
 
-1. Which built-in Windows counters accurately expose CPU usage and memory percentage across this machine?
-2. Should the initial version use manual foreground collector or a Scheduled Task only after reliability testing?
-3. How to bind receiver dynamically to Pi DHCP address at startup, and rebind safely on address changes?
-4. How to avoid duplicate samples after Windows reboot without making the implementation heavyweight?
+Within the same `session_id`, the receiver rejects a sequence <= that of the last accepted snapshot. On a different session, it requires a strictly later sample timestamp than the last accepted snapshot. The new session lets a restarted collector begin at sequence 1. The current receiver only remembers the **latest** snapshot, so it is not full lifetime replay prevention across all historical sessions; do not claim otherwise. The Windows collector must send sequentially, one outstanding sample at a time, and use current UTC timestamps.
 
-No receiver or collector should be deployed before these decisions are reviewed.
+## Prototype limitations before operational deployment
+
+- Token supplied through `ONYXCORE_TOKEN` environment variable (>=32 characters). Provision securely and avoid publishing or writing secret-bearing example commands in public logs. Do not use a hardcoded demo token on a live listener.
+- HTTP server currently uses `ThreadingHTTPServer`; connection/resource exhaustion and slow-client behavior need additional tests before unattended operation.
+- Snapshot writes fsync/replace each accepted sample; measure disk write rate and SD longevity before 5-second continuous collection.
+- Binding is fixed at process start; restarting on DHCP address change is not yet implemented.
+- No Windows collector or systemd unit exists yet.
+- Receiver input / state file should be tested with real USB traffic before automating anything.
+
+## Offline ARMv6 test evidence
+
+On 2026-11-01, the original Pi Zero (Python 3.13.5, ARMv6) passed 14 `unittest` tests in 0.714 seconds. Tests included bad JSON, oversize, unauthorized, valid/duplicate, wrong content type, session ID, boolean percentage, extra fields, NaN, uptime, stale payload, snapshot reload and new session sequence.
+
+Next gate: manually start the receiver on USB with an ephemeral test token, send one authenticated fixture from Windows, inspect HTTP result and saved sample, stop process. **Do not deploy a service or scheduled task yet.**

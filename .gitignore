@@ -1,0 +1,32 @@
+﻿# Secrets and environment
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+id_ed25519*
+*.sqlite
+*.db
+*.db-wal
+*.db-shm
+
+# Backups and runtime data
+backups/
+recovery/
+*.tar.gz
+*.sha256
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -38,9 +38,9 @@ The 32-bit OS is compatible with the original Pi Zero; the 64-bit variant is **n
 | Debian | 13 (Trixie) |
 | Kernel line | 6.18 |
 | Vendor SHA-256 | `2c302771f34c67a0b7ae7aa2e0dcdd3eac660504be59193c011ba79d412e1632` |
-| Actual download filename | Pending |
-| Actual `Get-FileHash` result | Pending |
-| Imager version used | 2.0.12 (screenshots and completed installation workflow) |
+| Actual download filename | Not recovered: no matching OS image in Downloads listing on 2026-11-01 |
+| Actual `Get-FileHash` result | Unavailable for flashed archive; do not claim vendor hash was independently checked |
+| Imager version used | 2.0.12; confirmed installed via Windows Uninstall registry on 2026-11-01 |
 | USB gadget setup method | Custom local content repository manifest and enabled official USB Gadget Mode; operational `rpi-usb-gadget-ics.service` confirmed |
 | First boot / reboot observations | Three Pi reboots and one Windows reboot retest passed on 2026-11-01; see [validation](../testing/usb-reboot-validation.md) |
 
@@ -84,3 +84,7 @@ These screenshots document the actual **Raspberry Pi Imager v2.0.12** UI sequenc
 ### Reproducibility record still required
 
 Record the manifest's true filename, generation method or source URL, Git commit/revision if available, and SHA-256. Never assume a UI manifest or restart alone enabled the USB gadget feature; after flashing, inspect generated boot customization and test USB link and multiple reboots.
+
+## 2026-11-01 Windows provenance check
+
+A read-only listing of SQUALL's user Downloads folder for `.img`, `.xz`, `.zip`, and `.json` found no identifiable Raspberry Pi OS image archive or USB gadget manifest. Windows' installed-program registry reports **Raspberry Pi Imager v2.0.12**. The Pi's running OS and USB reboot tests establish functional installation, but **do not establish the exact originally flashed archive filename or independently verified checksum**. The vendor SHA-256 recorded above is reference metadata only, not a measured local checksum. Check Imager cache or original manifest location if still available; do not download/reflash solely to fill these fields.

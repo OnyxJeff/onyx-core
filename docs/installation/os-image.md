@@ -1,6 +1,6 @@
 # v0.1.0 — Operating system image selection
 
-Status: **selected, not yet flashed or validated**. This document is part of [Issue #1](https://github.com/OnyxJeff/onyx-core/issues/1).
+Status: **flashed and USB/reboot functionality validated on 2026-11-01; archive filename/hash and custom manifest provenance remain unverified**. This document is part of [Issue #1](https://github.com/OnyxJeff/onyx-core/issues/1).
 
 ## Target
 
@@ -40,9 +40,9 @@ The 32-bit OS is compatible with the original Pi Zero; the 64-bit variant is **n
 | Vendor SHA-256 | `2c302771f34c67a0b7ae7aa2e0dcdd3eac660504be59193c011ba79d412e1632` |
 | Actual download filename | Pending |
 | Actual `Get-FileHash` result | Pending |
-| Imager version used | 2.0.12 (user screenshot; flashing not yet verified) |
-| USB gadget setup method | Custom local content repository manifest in Raspberry Pi Imager (USB Gadget Mode option to be verified at customization) |
-| First boot / reboot observations | Pending |
+| Imager version used | 2.0.12 (screenshots and completed installation workflow) |
+| USB gadget setup method | Custom local content repository manifest and enabled official USB Gadget Mode; operational `rpi-usb-gadget-ics.service` confirmed |
+| First boot / reboot observations | Three Pi reboots and one Windows reboot retest passed on 2026-11-01; see [validation](../testing/usb-reboot-validation.md) |
 
 ## USB gadget guidance and risks
 

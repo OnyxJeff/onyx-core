@@ -22,8 +22,8 @@ The 32-bit OS is compatible with the original Pi Zero; the 64-bit variant is **n
 ## Before writing the card
 
 1. Preserve verified old ONYX CORE recovery archives outside the repository.
-2. Download the *specific* 2026-10-06 Raspberry Pi OS Lite **32-bit** image/archive from the vendor's OS page, not a similarly named 64-bit/Legacy image.
-3. Use PowerShell `Get-FileHash -Algorithm SHA256 -LiteralPath <downloaded-file>` and confirm the checksum above. The vendor hash applies to the **downloaded image archive**, not its extracted `.img` contents.
+2. In **Raspberry Pi Imager v2.0.12**, go to **App Options → Content Repository → Edit → Use custom file**, browse to the locally generated custom manifest, and choose **Apply & Restart**. See the screenshot walkthrough below.
+3. Select **Raspberry Pi Zero** and Raspberry Pi OS Lite **32-bit** from the resulting catalog. Confirm the image release details in the Imager UI. If downloading the image archive separately, validate its vendor SHA-256; Imager's normal image download/verification follows its own workflow.
 4. Use Raspberry Pi Imager's OS customization to set hostname `svr-onyxcore`, a unique user/password, and SSH access. Keep any secrets out of GitHub.
 5. For this Trixie release, the Raspberry Pi `rpi-usb-gadget` feature is intended to provide USB Ethernet (RNDIS on Windows) and a `10.12.194.1/28` fallback address when not using ICS. Follow the current Imager USB Gadget toggle if available for the selected image; **do not combine it with manual `modules-load=dwc2,g_ether` or a custom gadget-watcher** unless explicitly validated.
 6. Do not enable or alter Windows Internet Connection Sharing in the initial USB enumeration test.
@@ -40,8 +40,8 @@ The 32-bit OS is compatible with the original Pi Zero; the 64-bit variant is **n
 | Vendor SHA-256 | `2c302771f34c67a0b7ae7aa2e0dcdd3eac660504be59193c011ba79d412e1632` |
 | Actual download filename | Pending |
 | Actual `Get-FileHash` result | Pending |
-| Imager version used | Pending |
-| USB gadget setup method | Pending |
+| Imager version used | 2.0.12 (user screenshot; flashing not yet verified) |
+| USB gadget setup method | Custom local content repository manifest in Raspberry Pi Imager (USB Gadget Mode option to be verified at customization) |
 | First boot / reboot observations | Pending |
 
 ## USB gadget guidance and risks
@@ -56,3 +56,31 @@ The 32-bit OS is compatible with the original Pi Zero; the 64-bit variant is **n
 ## Do not commit
 
 Passwords, SSH private keys, token files, real `.env` files, backups, or secret-bearing NetworkManager profiles.
+
+## Illustrated Imager custom-manifest setup (Windows)
+
+These screenshots document the actual **Raspberry Pi Imager v2.0.12** UI sequence. Screenshots show how to select a local custom **content repository manifest**, not proof of the selected OS or of a successful image write.
+
+1. From **Select your Raspberry Pi device**, click **APP OPTIONS** in the lower left.
+
+   ![Raspberry Pi Imager device selection, App Options highlighted](assets/imager-01-app-options.png)
+
+2. In **App Options**, select **EDIT** next to **Content Repository**.
+
+   ![Imager App Options showing Content Repository Edit](assets/imager-02-content-repository.png)
+
+3. In **Content Repository**, select **Use custom file** rather than the Raspberry Pi default repository.
+
+   ![Content Repository selector with Use custom file](assets/imager-03-custom-file.png)
+
+4. Click **BROWSE** and select the previously generated local `rpi-imager` manifest file. The file path shown in the screenshot is cropped; do **not** treat that truncated text as a known pathname.
+
+   ![Custom file source selected and Browse button](assets/imager-04-manifest-browse.png)
+
+5. Click **APPLY & RESTART**. The Imager catalog reloads from the selected manifest. Then choose the **Raspberry Pi Zero** (original), the **32-bit Lite** image, and enable **USB Gadget Mode** during customization, if the chosen image exposes the option.
+
+   ![Apply and Restart button for chosen manifest](assets/imager-05-apply-restart.png)
+
+### Reproducibility record still required
+
+Record the manifest's true filename, generation method or source URL, Git commit/revision if available, and SHA-256. Never assume a UI manifest or restart alone enabled the USB gadget feature; after flashing, inspect generated boot customization and test USB link and multiple reboots.

@@ -124,7 +124,7 @@ def handler_factory(token, store=None):
         def do_GET(self):
             if self.path == "/healthz":
                 return self.respond(200, {"status": "ok"})
-            if self.path in ("/dashboard", "/dashboard/"):
+            if urlsplit(self.path).path in ("/dashboard", "/dashboard/"):
                 target = store or getattr(self.server, "store", None)
                 if target is None or not hasattr(target, "recent"):
                     return self.respond(404, {"error": "not_found"})

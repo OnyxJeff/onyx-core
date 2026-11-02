@@ -222,13 +222,14 @@ def handler_factory(token, store=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bind", required=True, help="Explicit Pi USB ICS IPv4 address")
+    parser.add_argument("--allow-loopback-test", action="store_true", help="Allow localhost bind for isolated testing only")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--state-file", required=True)
     parser.add_argument("--history-file", help="Optional SQLite authoritative history; omit for snapshot-only compatibility")
     args = parser.parse_args()
     try:
         address = ipaddress.IPv4Address(args.bind)
-        if address not in ipaddress.IPv4Network("192.168.137.0/24") or address in (ipaddress.IPv4Address("192.168.137.0"), ipaddress.IPv4Address("192.168.137.255"), ipaddress.IPv4Address("192.168.137.1")):
+        if not (args.allow_loopback_test and address == ipaddress.IPv4Address("127.0.0.1")) and (address not in ipaddress.IPv4Network("192.168.137.0/24") or address in (ipaddress.IPv4Address("192.168.137.0"), ipaddress.IPv4Address("192.168.137.255"), ipaddress.IPv4Address("192.168.137.1"))):
             raise ValueError()
     except ValueError:
         parser.error("bind must be Pi's verified USB ICS IPv4 address")

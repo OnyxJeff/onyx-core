@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit, parse_qs
 
 MAX_BODY = 8192
 MAX_SKEW = timedelta(minutes=5)
@@ -122,9 +123,34 @@ def handler_factory(token, store=None):
 
         def do_GET(self):
             if self.path == "/healthz":
-                self.respond(200, {"status": "ok"})
-            else:
-                self.respond(404, {"error": "not_found"})
+                return self.respond(200, {"status": "ok"})
+            parsed = urlsplit(self.path)
+            if parsed.path not in ("/api/v1/history", "/api/v1/latest"):
+                return self.respond(404, {"error": "not_found"})
+            if not hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + token):
+                return self.respond(401, {"error": "unauthorized"})
+            target = store or getattr(self.server, "store", None)
+            if target is None or not hasattr(target, "recent"):
+                return self.respond(503, {"error": "history_unavailable"})
+            try:
+                if parsed.path == "/api/v1/latest":
+                    if parsed.query:
+                        return self.respond(400, {"error": "invalid_query"})
+                    latest = target.recent(limit=1)
+                    return self.respond(200, {"sample": latest[-1] if latest else None})
+                params = parse_qs(parsed.query, keep_blank_values=True)
+                if set(params) - {"limit"} or len(params.get("limit", ["120"])) != 1:
+                    return self.respond(400, {"error": "invalid_query"})
+                raw_limit = params.get("limit", ["120"])[0]
+                if not raw_limit.isascii() or not raw_limit.isdecimal() or len(raw_limit) > 3:
+                    return self.respond(400, {"error": "invalid_query"})
+                limit = int(raw_limit)
+                if not 1 <= limit <= 500:
+                    return self.respond(400, {"error": "invalid_query"})
+                samples = target.recent(limit=limit)
+                return self.respond(200, {"samples": samples, "count": len(samples)})
+            except (OSError, sqlite3.Error):
+                return self.respond(503, {"error": "history_unavailable"})
 
         def do_POST(self):
             if self.path != "/api/v1/telemetry":

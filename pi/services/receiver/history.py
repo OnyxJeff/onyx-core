@@ -19,7 +19,7 @@ class HistoryStore:
         self.path = Path(filename)
         self.retention_days = retention_days
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.path), timeout=5)
+        self.conn = sqlite3.connect(str(self.path), timeout=5, check_same_thread=False)
         try:
             # One writer, low commit frequency (30-second cadence); avoid
             # permanent -wal / -shm files on power-loss-sensitive microSD.

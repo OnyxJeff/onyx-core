@@ -23,6 +23,7 @@ def _stamp(sample):
 
 class IntegratedStore:
     def __init__(self, database, snapshot):
+        database_already_exists = Path(database).exists()
         self.history = HistoryStore(database)
         self.snapshot = Path(snapshot)
         self.lock = threading.Lock()
@@ -31,7 +32,7 @@ class IntegratedStore:
             with self.lock:
                 # One-time bootstrap from the last v0.2 snapshot when SQLite is new.
                 # The existing database always takes priority over the JSON cache.
-                if self.history.count() == 0 and self.snapshot.is_file():
+                if not database_already_exists and self.history.count() == 0 and self.snapshot.is_file():
                     try:
                         from .receiver import validate
                     except ImportError:

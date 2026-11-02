@@ -36,7 +36,7 @@ footer{margin-top:22px;color:#9da9bb;font-size:.83rem}
 <div class="panel"><div class="label">CPU</div><div class="value" id="cpu">—</div></div>
 <div class="panel"><div class="label">Memory</div><div class="value" id="memory">—</div></div>
 <div class="panel"><div class="label">Host uptime</div><div class="value" id="uptime">—</div></div>
-<div class="panel"><div class="label">Last sample (UTC)</div><div class="value" id="freshness" style="font-size:1.25rem">—</div></div>
+<div class="panel"><div class="label">Last sample (local)</div><div class="value" id="freshness" style="font-size:1.05rem;overflow-wrap:anywhere">—</div></div>
 </section>
 <section class="panel" style="margin-top:14px">
 <h2 style="font-size:1.1rem;margin:0">Recent usage</h2>
@@ -75,7 +75,8 @@ if(last){
 $('cpu').textContent=Number(last.metrics.cpu_percent).toFixed(1)+'%';
 $('memory').textContent=Number(last.metrics.memory_used_percent).toFixed(1)+'%';
 $('uptime').textContent=uptime(Number(last.metrics.uptime_seconds));
-$('freshness').textContent=last.timestamp_utc;
+$('freshness').textContent=new Date(last.timestamp_utc).toLocaleString();
+$('freshness').title='UTC: '+last.timestamp_utc;
 const age=(Date.now()-Date.parse(last.timestamp_utc))/1000;
 if(Number.isFinite(age)&&age>=0&&age<=90)status('LIVE','ok');else status('STALE','stale');
 $('message').textContent=samples.length+' samples shown · last fetch '+new Date().toLocaleTimeString();

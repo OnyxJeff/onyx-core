@@ -38,6 +38,17 @@ class HistoryStore:
                 UNIQUE(session_id, sequence)
             )""")
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_timestamp ON samples(timestamp_utc)")
+            # Acceptance watermark survives history pruning.
+            self.conn.execute("""CREATE TABLE IF NOT EXISTS acceptance_watermark (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                timestamp_utc TEXT NOT NULL,
+                source TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                cpu_percent REAL NOT NULL,
+                memory_used_percent REAL NOT NULL,
+                uptime_seconds INTEGER NOT NULL
+            )""")
             self.conn.commit()
         except Exception:
             self.conn.close()
@@ -55,6 +66,13 @@ class HistoryStore:
         cutoff = (reference - timedelta(days=self.retention_days)).isoformat(timespec="seconds").replace("+00:00", "Z")
         metrics = sample["metrics"]
         with self.conn:
+            prev = self.boundary()
+            if prev is not None:
+                if sample["session_id"] == prev["session_id"]:
+                    if sample["sequence"] <= prev["sequence"]:
+                        return False
+                elif sample["timestamp_utc"] <= prev["timestamp_utc"]:
+                    return False
             self.conn.execute("DELETE FROM samples WHERE timestamp_utc < ?", (cutoff,))
             cursor = self.conn.execute(
                 """INSERT OR IGNORE INTO samples
@@ -65,7 +83,30 @@ class HistoryStore:
                  sample["sequence"], metrics["cpu_percent"],
                  metrics["memory_used_percent"], metrics["uptime_seconds"]),
             )
+            if cursor.rowcount:
+                self.conn.execute(
+                    """INSERT OR REPLACE INTO acceptance_watermark
+                       (singleton, timestamp_utc, source, session_id, sequence,
+                        cpu_percent, memory_used_percent, uptime_seconds)
+                       VALUES (1, ?, ?, ?, ?, ?, ?, ?)""",
+                    (sample["timestamp_utc"], sample["source"], sample["session_id"],
+                     sample["sequence"], metrics["cpu_percent"],
+                     metrics["memory_used_percent"], metrics["uptime_seconds"]),
+                )
         return cursor.rowcount == 1
+
+    def boundary(self):
+        row = self.conn.execute(
+            """SELECT timestamp_utc, source, session_id, sequence,
+                      cpu_percent, memory_used_percent, uptime_seconds
+               FROM acceptance_watermark WHERE singleton = 1"""
+        ).fetchone()
+        if row is None:
+            return None
+        return {"timestamp_utc": row[0], "source": row[1],
+                "session_id": row[2], "sequence": row[3],
+                "metrics": {"cpu_percent": row[4], "memory_used_percent": row[5],
+                            "uptime_seconds": row[6]}}
 
     def recent(self, limit=120):
         if type(limit) is not int or not 1 <= limit <= MAX_QUERY_ROWS:

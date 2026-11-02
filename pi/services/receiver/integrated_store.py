@@ -27,19 +27,23 @@ class IntegratedStore:
         self.snapshot = Path(snapshot)
         self.lock = threading.Lock()
         self.last_cache_error = False
-        with self.lock:
-            # One-time bootstrap from the last v0.2 snapshot when SQLite is new.
-            # The existing database always takes priority over the JSON cache.
-            if self.history.count() == 0 and self.snapshot.is_file():
-                try:
-                    from .receiver import validate
-                except ImportError:
-                    from receiver import validate
-                with self.snapshot.open("r", encoding="utf-8") as stream:
-                    candidate = json.load(stream)
-                validate(candidate, check_freshness=False)
-                self.history.append(candidate)
-            self._repair_cache()
+        try:
+            with self.lock:
+                # One-time bootstrap from the last v0.2 snapshot when SQLite is new.
+                # The existing database always takes priority over the JSON cache.
+                if self.history.count() == 0 and self.snapshot.is_file():
+                    try:
+                        from .receiver import validate
+                    except ImportError:
+                        from receiver import validate
+                    with self.snapshot.open("r", encoding="utf-8") as stream:
+                        candidate = json.load(stream)
+                    validate(candidate, check_freshness=False)
+                    self.history.append(candidate)
+                self._repair_cache()
+        except Exception:
+            self.history.close()
+            raise
 
     def _repair_cache(self):
         latest = self.history.recent(limit=1)

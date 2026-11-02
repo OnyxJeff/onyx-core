@@ -1,0 +1,26 @@
+[Unit]
+Description=ONYX CORE USB telemetry receiver (v0.2.0 development)
+Wants=network-online.target
+After=NetworkManager.service network-online.target rpi-usb-gadget-ics.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=onyxcore
+Group=onyxcore
+EnvironmentFile=/etc/onyxcore/receiver.env
+ExecStart=/opt/onyxcore/launch-receiver.sh
+Restart=on-failure
+RestartSec=15
+UMask=0077
+WorkingDirectory=/var/lib/onyxcore
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/onyxcore
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

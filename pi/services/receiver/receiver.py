@@ -1,0 +1,191 @@
+"""ONYX CORE prototype receiver: standard library only, no deployed service."""
+import argparse
+import hmac
+import ipaddress
+import json
+import math
+import os
+import tempfile
+import threading
+import uuid
+from datetime import datetime, timezone, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+MAX_BODY = 8192
+MAX_SKEW = timedelta(minutes=5)
+KEYS = {"schema_version", "source", "session_id", "timestamp_utc", "sequence", "metrics"}
+METRICS = {"cpu_percent", "memory_used_percent", "uptime_seconds"}
+
+
+def validate(payload, now=None, check_freshness=True):
+    if type(payload) is not dict or set(payload) != KEYS:
+        raise ValueError("invalid envelope fields")
+    if type(payload["schema_version"]) is not int or payload["schema_version"] != 1:
+        raise ValueError("unsupported schema")
+    if payload["source"] != "SQUALL":
+        raise ValueError("unsupported source")
+    try:
+        sid = payload["session_id"]
+        if type(sid) is not str or str(uuid.UUID(sid)) != sid:
+            raise ValueError("invalid session_id")
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise ValueError("invalid session_id") from exc
+    seq = payload["sequence"]
+    if type(seq) is not int or not 1 <= seq <= 2**63 - 1:
+        raise ValueError("invalid sequence")
+    stamp = payload["timestamp_utc"]
+    if type(stamp) is not str or len(stamp) > 40 or not stamp.endswith("Z"):
+        raise ValueError("invalid UTC timestamp")
+    try:
+        parsed = datetime.fromisoformat(stamp[:-1] + "+00:00")
+    except ValueError as exc:
+        raise ValueError("invalid UTC timestamp") from exc
+    if parsed.utcoffset() != timedelta(0):
+        raise ValueError("timestamp must be UTC")
+    reference = now or datetime.now(timezone.utc)
+    if check_freshness and abs(reference - parsed) > MAX_SKEW:
+        raise ValueError("timestamp outside allowed skew")
+    metrics = payload["metrics"]
+    if type(metrics) is not dict or set(metrics) != METRICS:
+        raise ValueError("invalid metrics")
+    for key in ("cpu_percent", "memory_used_percent"):
+        val = metrics[key]
+        if type(val) not in (int, float) or not math.isfinite(val) or not 0 <= val <= 100:
+            raise ValueError("invalid percentage")
+    up = metrics["uptime_seconds"]
+    if type(up) is not int or not 0 <= up <= 2**63 - 1:
+        raise ValueError("invalid uptime")
+    return payload
+
+
+class SnapshotStore:
+    """Store only latest accepted envelope; atomic replacement; thread safe."""
+    def __init__(self, filename):
+        self.path = Path(filename)
+        self.lock = threading.Lock()
+        self.last = None
+        if self.path.is_file():
+            with self.path.open("r", encoding="utf-8") as f:
+                candidate = json.load(f)
+            validate(candidate, check_freshness=False)
+            self.last = candidate
+
+    def accept(self, sample):
+        with self.lock:
+            prev = self.last
+            if prev is not None:
+                if sample["session_id"] == prev["session_id"]:
+                    if sample["sequence"] <= prev["sequence"]:
+                        return False
+                elif datetime.fromisoformat(sample["timestamp_utc"][:-1] + "+00:00") <= datetime.fromisoformat(prev["timestamp_utc"][:-1] + "+00:00"):
+                    return False
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(prefix=".snapshot-", dir=self.path.parent)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(sample, f, allow_nan=False, separators=(",", ":"))
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.chmod(tmp, 0o600)
+                os.replace(tmp, self.path)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+            self.last = sample
+            return True
+
+
+def handler_factory(token, store=None):
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "OnyxCore/0.2-dev"
+        sys_version = ""
+        timeout = 5
+
+        def log_message(self, fmt, *args):
+            # Avoid reflecting client-controlled request paths, headers or payloads.
+            print("receiver request completed", flush=True)
+
+        def respond(self, status, data):
+            raw = json.dumps(data, separators=(",", ":")).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            try:
+                self.wfile.write(raw)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            self.close_connection = True
+
+        def do_GET(self):
+            if self.path == "/healthz":
+                self.respond(200, {"status": "ok"})
+            else:
+                self.respond(404, {"error": "not_found"})
+
+        def do_POST(self):
+            if self.path != "/api/v1/telemetry":
+                return self.respond(404, {"error": "not_found"})
+            if not hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + token):
+                return self.respond(401, {"error": "unauthorized"})
+            if self.headers.get("Transfer-Encoding") is not None:
+                return self.respond(400, {"error": "unsupported_transfer_encoding"})
+            if self.headers.get("Content-Type", "").lower() != "application/json":
+                return self.respond(415, {"error": "unsupported_media_type"})
+            lengths = self.headers.get_all("Content-Length", [])
+            if len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdecimal():
+                return self.respond(400, {"error": "invalid_length"})
+            n = int(lengths[0]) if len(lengths[0]) <= 5 else MAX_BODY + 1
+            if n > MAX_BODY:
+                return self.respond(413, {"error": "payload_too_large"})
+            raw = self.rfile.read(n)
+            if len(raw) != n:
+                return self.respond(400, {"error": "truncated_body"})
+            try:
+                payload = json.loads(raw.decode("utf-8"), parse_constant=lambda _: (_ for _ in ()).throw(ValueError("nonfinite")))
+                validate(payload)
+            except (ValueError, UnicodeDecodeError):
+                return self.respond(422, {"error": "invalid_payload"})
+            target = store or getattr(self.server, "store", None)
+            if target is None:
+                return self.respond(503, {"error": "store_not_configured"})
+            try:
+                accepted = target.accept(payload)
+            except OSError:
+                return self.respond(503, {"error": "storage_unavailable"})
+            if not accepted:
+                return self.respond(409, {"error": "out_of_order_or_duplicate"})
+            return self.respond(202, {"accepted": True, "sequence": payload["sequence"]})
+
+    return Handler
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--bind", required=True, help="Explicit Pi USB ICS IPv4 address")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--state-file", required=True)
+    args = parser.parse_args()
+    try:
+        address = ipaddress.IPv4Address(args.bind)
+        if address not in ipaddress.IPv4Network("192.168.137.0/24") or address in (ipaddress.IPv4Address("192.168.137.0"), ipaddress.IPv4Address("192.168.137.255"), ipaddress.IPv4Address("192.168.137.1")):
+            raise ValueError()
+    except ValueError:
+        parser.error("bind must be Pi's verified USB ICS IPv4 address")
+    token = os.environ.get("ONYXCORE_TOKEN", "")
+    if len(token) < 32:
+        parser.error("ONYXCORE_TOKEN must be securely provisioned (32+ characters)")
+    store = SnapshotStore(args.state_file)
+    server = ThreadingHTTPServer((args.bind, args.port), handler_factory(token, store))
+    server.daemon_threads = True
+    print("Receiver listening on USB IPv4 only", flush=True)
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()

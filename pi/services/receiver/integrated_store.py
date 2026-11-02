@@ -90,6 +90,17 @@ class IntegratedStore:
         with self.lock:
             return self.history.recent(limit)
 
+    def health(self, now=None):
+        """Evaluate committed telemetry freshness without writing to SQLite."""
+        try:
+            from .health import evaluate_health
+        except ImportError:
+            from health import evaluate_health
+        with self.lock:
+            boundary = self.history.boundary()
+            timestamp = boundary["timestamp_utc"] if boundary else None
+        return evaluate_health(timestamp, now=now)
+
     def close(self):
         with self.lock:
             self.history.close()

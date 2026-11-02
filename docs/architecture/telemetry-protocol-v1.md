@@ -1,6 +1,6 @@
 # ONYX CORE telemetry protocol v1 — implemented prototype contract
 
-Tracking: [Issue #5](https://github.com/OnyxJeff/onyx-core/issues/5). Status: **prototype tested offline on Pi Zero (14/14 tests); no real host-to-Pi request or persistent service validated yet**.
+Tracking: [Issue #5](https://github.com/OnyxJeff/onyx-core/issues/5). Status: **implemented and field-validated on Pi Zero and Windows SQUALL (14/14 offline tests, live receiver, collector, reboot and USB outage recovery).**
 
 ## Transport and trust boundary
 
@@ -43,17 +43,17 @@ HTTP port 8765 over SQUALL ↔ Pi USB RNDIS. Receiver **must bind to the Pi's ac
 
 Within the same `session_id`, the receiver rejects a sequence <= that of the last accepted snapshot. On a different session, it requires a strictly later sample timestamp than the last accepted snapshot. The new session lets a restarted collector begin at sequence 1. The current receiver only remembers the **latest** snapshot, so it is not full lifetime replay prevention across all historical sessions; do not claim otherwise. The Windows collector must send sequentially, one outstanding sample at a time, and use current UTC timestamps.
 
-## Prototype limitations before operational deployment
+## Operational deployment and limitations
 
-- Token supplied through `ONYXCORE_TOKEN` environment variable (>=32 characters). Provision securely and avoid publishing or writing secret-bearing example commands in public logs. Do not use a hardcoded demo token on a live listener.
-- HTTP server currently uses `ThreadingHTTPServer`; connection/resource exhaustion and slow-client behavior need additional tests before unattended operation.
-- Snapshot writes fsync/replace each accepted sample; measure disk write rate and SD longevity before 5-second continuous collection.
-- Binding is fixed at process start; restarting on DHCP address change is not yet implemented.
-- No Windows collector or systemd unit exists yet.
-- Receiver input / state file should be tested with real USB traffic before automating anything.
+- Token read via `ONYXCORE_TOKEN` from the root-protected `/etc/onyxcore/receiver.env` and used by the dedicated `onyxcore` service; Windows CurrentUser DPAPI token stays outside Git.
+- `ThreadingHTTPServer` is bound only to the currently assigned Pi USB IPv4. `launch-receiver.sh` retries on absent DHCP through systemd; NetworkManager dispatcher `90-onyxcore-receiver` restarts an active receiver when the USB address differs. **An actual live DHCP readdress has not been tested.**
+- The receiver atomically replaces one latest-sample JSON with mode 0600. There is no historical database. SD endurance under prolonged duty cycles has not been benchmarked.
+- Client is Windows PowerShell 5.1 under `SQUALL\\jmay2`, with Scheduled Task Interactive logon trigger. `wscript.exe` starts the collector invisibly and forwards its exit code. The task does not run before Windows user sign-in.
+- A bounded USB RNDIS interruption produced two logged collection failures and then resumed accepted sequences without collector restart. No TLS: bearer token travels over the local USB HTTP path; this is not protection against a compromised Windows host.
+- Full security review and reproducible-install audit remain release gates; see [installation](../installation/v0.2.0-install.md) and [validation](../testing/v0.2.0-validation.md).
 
 ## Offline ARMv6 test evidence
 
 On 2026-11-01, the original Pi Zero (Python 3.13.5, ARMv6) passed 14 `unittest` tests in 0.714 seconds. Tests included bad JSON, oversize, unauthorized, valid/duplicate, wrong content type, session ID, boolean percentage, extra fields, NaN, uptime, stale payload, snapshot reload and new session sequence.
 
-Next gate: manually start the receiver on USB with an ephemeral test token, send one authenticated fixture from Windows, inspect HTTP result and saved sample, stop process. **Do not deploy a service or scheduled task yet.**
+Subsequent live USB, persistent receiver, Windows collector, Task Scheduler, outage and reboot validation **passed**. See the evidence log in the validation guide.

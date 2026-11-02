@@ -44,4 +44,6 @@ python3 -m unittest discover -s tests/services -p 'test_*.py' -v
 - v0.5.0: operational resilience
 - v1.0.0: stable installation and maintenance baseline
 
+For environment-specific startup failures on Raspberry Pi USB gadget/RNDIS and Windows Internet Connection Sharing, see the [USB gadget / ICS troubleshooting runbook](docs/troubleshooting/usb-gadget-networking.md) (tracked in [issue #10](https://github.com/OnyxJeff/onyx-core/issues/10)). It documents verified symptoms, safe diagnostics, recovery, rollback and limitations; it is **not** required setup for every installation.
+
 See the `docs/` directory for operational guidance.

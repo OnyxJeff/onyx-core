@@ -47,10 +47,10 @@ class IntegratedStore:
             raise
 
     def _repair_cache(self):
-        latest = self.history.recent(limit=1)
-        if not latest:
+        latest = self.history.boundary()
+        if latest is None:
             return
-        sample = {"schema_version": 1, **latest[0]}
+        sample = {"schema_version": 1, **latest}
         self.snapshot.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(prefix=".snapshot-", dir=self.snapshot.parent)
         try:
@@ -66,9 +66,8 @@ class IntegratedStore:
 
     def accept(self, sample):
         with self.lock:
-            previous = self.history.recent(limit=1)
-            if previous:
-                last = previous[0]
+            last = self.history.boundary()
+            if last is not None:
                 if sample["session_id"] == last["session_id"]:
                     if sample["sequence"] <= last["sequence"]:
                         return False

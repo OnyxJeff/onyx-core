@@ -1,0 +1,25 @@
+#!/bin/sh
+# ONYX CORE: restart an already-running receiver if USB ICS DHCP changes its IP.
+# NetworkManager dispatcher receives interface name as $1 and action as $2.
+set -eu
+[ "${1:-}" = "usb0" ] || exit 0
+case "${2:-}" in up|dhcp4-change) ;; *) exit 0 ;; esac
+
+# Never start a disabled/inactive service, and never interfere with NM/ICS.
+systemctl -q is-active onyxcore-receiver.service || exit 0
+
+new_ip=$(/usr/sbin/ip -4 -o addr show dev usb0 scope global |
+  /usr/bin/awk '$4 ~ /^192[.]168[.]137[.]/ { sub(/\/.*/, "", $4); print $4; exit }')
+[ -n "$new_ip" ] || exit 0
+
+pid=$(systemctl show -p MainPID --value onyxcore-receiver.service)
+case "$pid" in ''|0|*[!0-9]*) exit 0 ;; esac
+[ -r "/proc/$pid/cmdline" ] || exit 0
+
+old_ip=$(/usr/bin/tr '\000' '\n' < "/proc/$pid/cmdline" |
+  /usr/bin/awk 'prior=="--bind" { print; exit } { prior=$0 }')
+[ -n "$old_ip" ] || exit 0
+if [ "$new_ip" != "$old_ip" ]; then
+  logger -t onyxcore-dispatcher "USB address changed; restarting receiver"
+  systemctl restart onyxcore-receiver.service
+fi

@@ -47,7 +47,7 @@ class DashboardTests(unittest.TestCase):
         try:
             connection = HTTPConnection("127.0.0.1", server.server_port)
             try:
-                connection.request("GET", "/dashboard")
+                connection.request("GET", "/dashboard?utm_source=chatgpt.com")
                 response = connection.getresponse()
                 html = response.read()
                 self.assertEqual(response.status, 200)

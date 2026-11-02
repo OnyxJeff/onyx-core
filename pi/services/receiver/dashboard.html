@@ -128,9 +128,8 @@ status(state==='healthy'?'LIVE':state.toUpperCase(),state==='healthy'?'ok':state
 $('message').textContent=samples.length+' samples shown · last fetch '+new Date().toLocaleTimeString();
 }catch(error){
 status('UNREACHABLE','bad');
-$('message').textContent='Receiver request failed; showing last known readings.';
 showHealth('receiver_unreachable','Cannot reach the receiver; CPU, memory and chart values are last known, not live. Check USB connection and service.');
-$('message').textContent='Receiver request failed; retrying on next refresh.';
+$('message').textContent='Receiver request failed; displaying last known readings and retrying on next refresh.';
 }finally{busy=false;}
 }
 $('connect').addEventListener('click',()=>{token=$('token').value;$('token').value='';if(!token){status('TOKEN REQUIRED','stale');return;}if(timer)clearInterval(timer);poll();timer=setInterval(poll,30000);});

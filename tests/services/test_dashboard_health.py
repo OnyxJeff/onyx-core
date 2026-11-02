@@ -23,6 +23,19 @@ class DashboardHealthTests(unittest.TestCase):
         self.assertIn("Recovered: fresh telemetry received.", self.html)
         self.assertIn("previousHealth!==state", self.html)
 
+    def test_recovery_only_after_an_incident(self):
+        self.assertIn("const wasIncident=['warning','critical','degraded','receiver_unreachable']", self.html)
+        self.assertIn("state==='healthy'&&wasIncident", self.html)
+        self.assertIn("Fresh telemetry received.", self.html)
+
+    def test_single_sample_marker(self):
+        self.assertIn("if(samples.length===1)", self.html)
+        self.assertIn("document.createElementNS(ns,'circle')", self.html)
+
+    def test_unreachable_identifies_cached_readings(self):
+        self.assertIn("last known, not live", self.html)
+        self.assertIn("displaying last known readings", self.html)
+
     def test_no_persistent_token_storage(self):
         self.assertNotIn("localStorage", self.html)
         self.assertNotIn("sessionStorage", self.html)

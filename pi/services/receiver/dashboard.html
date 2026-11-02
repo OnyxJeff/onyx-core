@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>ONYX CORE | SQUALL telemetry</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#e7eaf0;background:#0b1018}
+*{box-sizing:border-box}body{margin:0;padding:clamp(14px,3vw,32px);max-width:1100px;margin-inline:auto}
+header{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
+h1{font-size:1.35rem;letter-spacing:.13em;margin:0}p,small{color:#aebaca}
+.layout{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-top:20px}
+.panel{border:1px solid #2b3545;background:#141c29;border-radius:14px;padding:18px}
+.label{color:#aebaca;font-size:.9rem}.value{font-size:2.1rem;font-weight:700;margin:12px 0 4px}
+.status{font-weight:700}.ok{color:#61dab6}.stale{color:#ffbe69}.bad{color:#ff8787}
+.controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:16px}
+input,button,select{background:#222d3d;border:1px solid #435169;color:white;padding:9px 12px;border-radius:8px;font:inherit}
+input{min-width:200px}button{cursor:pointer}button:hover{background:#334459}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #61dab6}
+.chart{width:100%;height:180px;display:block;margin-top:10px}.chartline{fill:none;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+.cpu{stroke:#61dab6}.memory{stroke:#ad9cff}
+.legend{display:flex;gap:18px;flex-wrap:wrap}.legend span{font-size:.9rem}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+footer{margin-top:22px;color:#9da9bb;font-size:.83rem}
+</style>
+</head>
+<body>
+<header><div><h1>ONYX CORE</h1><small>SQUALL / USB TELEMETRY</small></div><div id="status" class="status stale" role="status">Awaiting connection</div></header>
+<div class="controls">
+<label for="token">Read API token</label><input type="password" id="token" autocomplete="off" placeholder="Paste bearer token">
+<button id="connect">Connect</button><button id="disconnect">Disconnect</button>
+<label for="range">Samples</label><select id="range"><option value="60">60 (~30 min)</option><option value="120" selected>120 (~1 hour)</option><option value="500">500 (~4 hours)</option></select>
+</div>
+<p id="message" aria-live="polite">The token stays in this browser tab's memory only. It is not saved in local storage.</p>
+<section class="layout" aria-label="Latest telemetry">
+<div class="panel"><div class="label">CPU</div><div class="value" id="cpu">—</div></div>
+<div class="panel"><div class="label">Memory</div><div class="value" id="memory">—</div></div>
+<div class="panel"><div class="label">Host uptime</div><div class="value" id="uptime">—</div></div>
+<div class="panel"><div class="label">Last sample (UTC)</div><div class="value" id="freshness" style="font-size:1.25rem">—</div></div>
+</section>
+<section class="panel" style="margin-top:14px">
+<h2 style="font-size:1.1rem;margin:0">Recent usage</h2>
+<p>CPU and memory percentage · oldest to newest</p>
+<svg class="chart" id="chart" viewBox="0 0 800 180" role="img" aria-label="CPU and memory telemetry history"></svg>
+<div class="legend"><span><i class="dot" style="background:#61dab6"></i>CPU</span><span><i class="dot" style="background:#ad9cff"></i>Memory</span></div>
+</section>
+<footer>Refreshes every 30 seconds. Local-only dashboard; API authorization required. No third-party assets.</footer>
+<script>
+(()=>{'use strict';
+const $=id=>document.getElementById(id);
+let token='',timer=null,busy=false;
+const status=(text,klass)=>{$('status').textContent=text;$('status').className='status '+klass;};
+function uptime(seconds){if(!Number.isFinite(seconds))return '—';const d=Math.floor(seconds/86400),h=Math.floor(seconds%86400/3600),m=Math.floor(seconds%3600/60);return d+'d '+h+'h '+m+'m';}
+function chart(samples){
+const svg=$('chart');svg.replaceChildren();if(!samples.length)return;
+const ns='http://www.w3.org/2000/svg',w=800,h=180,p=12;
+const line=(values,klass)=>{
+const path=document.createElementNS(ns,'path');let d='';
+values.forEach((v,i)=>{const x=p+(w-2*p)*i/Math.max(values.length-1,1),y=h-p-(h-2*p)*Math.min(100,Math.max(0,v))/100;d+=(i?' L':'M')+x.toFixed(2)+' '+y.toFixed(2);});
+path.setAttribute('d',d);path.setAttribute('class','chartline '+klass);svg.append(path);
+};
+for(const y of [25,50,75]){const l=document.createElementNS(ns,'line');l.setAttribute('x1','0');l.setAttribute('x2','800');l.setAttribute('y1',String(h-p-(h-2*p)*y/100));l.setAttribute('y2',String(h-p-(h-2*p)*y/100));l.setAttribute('stroke','#364258');l.setAttribute('stroke-dasharray','4 6');svg.append(l);}
+line(samples.map(x=>Number(x.metrics.cpu_percent)),'cpu');
+line(samples.map(x=>Number(x.metrics.memory_used_percent)),'memory');
+}
+async function poll(){
+if(!token||busy)return;busy=true;
+try{
+const limit=$('range').value;
+const response=await fetch('/api/v1/history?limit='+encodeURIComponent(limit),{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+if(!response.ok)throw new Error('History request failed (HTTP '+response.status+')');
+const result=await response.json();const samples=result.samples||[],last=samples[samples.length-1];
+chart(samples);
+if(last){
+$('cpu').textContent=Number(last.metrics.cpu_percent).toFixed(1)+'%';
+$('memory').textContent=Number(last.metrics.memory_used_percent).toFixed(1)+'%';
+$('uptime').textContent=uptime(Number(last.metrics.uptime_seconds));
+$('freshness').textContent=last.timestamp_utc;
+const age=(Date.now()-Date.parse(last.timestamp_utc))/1000;
+if(Number.isFinite(age)&&age>=0&&age<=90)status('LIVE','ok');else status('STALE','stale');
+$('message').textContent=samples.length+' samples shown · last fetch '+new Date().toLocaleTimeString();
+}else{status('NO DATA','stale');$('message').textContent='Waiting for telemetry samples.';}
+}catch(error){status('DISCONNECTED','bad');$('message').textContent=error.message;}finally{busy=false;}
+}
+$('connect').addEventListener('click',()=>{token=$('token').value;$('token').value='';if(!token){status('TOKEN REQUIRED','stale');return;}if(timer)clearInterval(timer);poll();timer=setInterval(poll,30000);});
+$('disconnect').addEventListener('click',()=>{token='';$('token').value='';if(timer)clearInterval(timer);timer=null;status('DISCONNECTED','stale');$('message').textContent='Token cleared from dashboard memory.';});
+$('range').addEventListener('change',poll);
+})();
+</script>
+</body>
+</html>

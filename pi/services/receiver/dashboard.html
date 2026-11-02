@@ -38,6 +38,7 @@ footer{margin-top:22px;color:#9da9bb;font-size:.83rem}
 <div class="panel"><div class="label">Host uptime</div><div class="value" id="uptime">—</div></div>
 <div class="panel"><div class="label">Last sample (local)</div><div class="value" id="freshness" style="font-size:1.05rem;overflow-wrap:anywhere">—</div></div>
 </section>
+<section class="panel" style="margin-top:14px" aria-label="Health alerts"><div class="label">TELEMETRY HEALTH</div><div id="health-state" class="status stale">Not connected</div><p id="health-detail" aria-live="polite">Connect to check telemetry freshness.</p><p id="health-event" aria-live="polite"></p></section>
 <section class="panel" style="margin-top:14px">
 <h2 style="font-size:1.1rem;margin:0">Recent usage</h2>
 <p>CPU and memory percentage · oldest to newest</p>
@@ -48,7 +49,7 @@ footer{margin-top:22px;color:#9da9bb;font-size:.83rem}
 <script>
 (()=>{'use strict';
 const $=id=>document.getElementById(id);
-let token='',timer=null,busy=false;
+let token='',timer=null,busy=false,previousHealth=null;
 const status=(text,klass)=>{$('status').textContent=text;$('status').className='status '+klass;};
 function uptime(seconds){if(!Number.isFinite(seconds))return '—';const d=Math.floor(seconds/86400),h=Math.floor(seconds%86400/3600),m=Math.floor(seconds%3600/60);return d+'d '+h+'h '+m+'m';}
 function chart(samples){
@@ -63,13 +64,36 @@ for(const y of [25,50,75]){const l=document.createElementNS(ns,'line');l.setAttr
 line(samples.map(x=>Number(x.metrics.cpu_percent)),'cpu');
 line(samples.map(x=>Number(x.metrics.memory_used_percent)),'memory');
 }
+function showHealth(state,detail){
+const display={healthy:['HEALTHY','ok'],warning:['WARNING','stale'],critical:['CRITICAL','bad'],no_data:['NO DATA','stale'],unknown:['UNKNOWN','stale'],degraded:['DEGRADED','bad'],receiver_unreachable:['RECEIVER UNREACHABLE','bad']};
+const entry=display[state]||display.unknown;
+$('health-state').textContent=entry[0];$('health-state').className='status '+entry[1];
+$('health-detail').textContent=detail;
+if(previousHealth!==null&&previousHealth!==state){
+$('health-event').textContent=state==='healthy'?'Recovered: fresh telemetry received.':'Health changed: '+entry[0]+'.';
+}
+previousHealth=state;
+}
 async function poll(){
 if(!token||busy)return;busy=true;
 try{
 const limit=$('range').value;
-const response=await fetch('/api/v1/history?limit='+encodeURIComponent(limit),{headers:{Authorization:'Bearer '+token},cache:'no-store'});
-if(!response.ok)throw new Error('History request failed (HTTP '+response.status+')');
-const result=await response.json();const samples=result.samples||[],last=samples[samples.length-1];
+const options={headers:{Authorization:'Bearer '+token},cache:'no-store'};
+const [historyResponse,healthResponse]=await Promise.all([
+fetch('/api/v1/history?limit='+encodeURIComponent(limit),options),
+fetch('/api/v1/health',options)
+]);
+if(historyResponse.status===401||healthResponse.status===401){
+status('AUTH FAILED','bad');showHealth('unknown','Authentication rejected; check token.');
+$('message').textContent='Authentication failed (HTTP 401).';return;
+}
+if(!historyResponse.ok||!healthResponse.ok){
+const code=!healthResponse.ok?healthResponse.status:historyResponse.status;
+status('DEGRADED','bad');showHealth('degraded','Receiver responded, but data is unavailable (HTTP '+code+').');
+$('message').textContent='API error HTTP '+code;return;
+}
+const [result,health]=await Promise.all([historyResponse.json(),healthResponse.json()]);
+const samples=Array.isArray(result.samples)?result.samples:[],last=samples[samples.length-1];
 chart(samples);
 if(last){
 $('cpu').textContent=Number(last.metrics.cpu_percent).toFixed(1)+'%';
@@ -77,14 +101,27 @@ $('memory').textContent=Number(last.metrics.memory_used_percent).toFixed(1)+'%';
 $('uptime').textContent=uptime(Number(last.metrics.uptime_seconds));
 $('freshness').textContent=new Date(last.timestamp_utc).toLocaleString();
 $('freshness').title='UTC: '+last.timestamp_utc;
-const age=(Date.now()-Date.parse(last.timestamp_utc))/1000;
-if(Number.isFinite(age)&&age>=0&&age<=90)status('LIVE','ok');else status('STALE','stale');
+}else{
+$('cpu').textContent='—';$('memory').textContent='—';$('uptime').textContent='—';$('freshness').textContent='—';
+}
+const validStates=['healthy','warning','critical','no_data','unknown','degraded'];
+const state=validStates.includes(health.status)?health.status:'unknown';
+const age=Number.isFinite(health.age_seconds)?health.age_seconds+'s since last accepted sample':'No reliable sample age';
+const detail=state==='no_data'?'No samples accepted yet; collector may not have started.':
+state==='unknown'?'Telemetry clock or freshness cannot be verified.':
+state==='degraded'?'Telemetry store reports degraded operation.':
+age+(state==='healthy'?' · receiving normally.':' · collector may be stopped, logged out or disconnected.');
+showHealth(state,detail);
+status(state==='healthy'?'LIVE':state.toUpperCase(),state==='healthy'?'ok':state==='critical'||state==='degraded'?'bad':'stale');
 $('message').textContent=samples.length+' samples shown · last fetch '+new Date().toLocaleTimeString();
-}else{status('NO DATA','stale');$('message').textContent='Waiting for telemetry samples.';}
-}catch(error){status('DISCONNECTED','bad');$('message').textContent=error.message;}finally{busy=false;}
+}catch(error){
+status('UNREACHABLE','bad');
+showHealth('receiver_unreachable','Cannot reach the receiver or read a valid response; check USB connection and service.');
+$('message').textContent='Receiver request failed; retrying on next refresh.';
+}finally{busy=false;}
 }
 $('connect').addEventListener('click',()=>{token=$('token').value;$('token').value='';if(!token){status('TOKEN REQUIRED','stale');return;}if(timer)clearInterval(timer);poll();timer=setInterval(poll,30000);});
-$('disconnect').addEventListener('click',()=>{token='';$('token').value='';if(timer)clearInterval(timer);timer=null;status('DISCONNECTED','stale');$('message').textContent='Token cleared from dashboard memory.';});
+$('disconnect').addEventListener('click',()=>{token='';previousHealth=null;$('health-event').textContent='';showHealth('no_data','Disconnected; monitoring paused.');$('token').value='';if(timer)clearInterval(timer);timer=null;status('DISCONNECTED','stale');$('message').textContent='Token cleared from dashboard memory.';});
 $('range').addEventListener('change',poll);
 })();
 </script>

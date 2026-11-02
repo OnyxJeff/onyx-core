@@ -18,6 +18,8 @@ $credential = $null
 $failures = 0
 $logDir = Join-Path $env:LOCALAPPDATA 'OnyxCore'
 $logFile = Join-Path $logDir 'collector.log'
+$launcherPid = $null
+$launcherStarted = $null
 
 function Write-CollectorEvent {
     param([string]$Level, [string]$Message)
@@ -32,7 +34,28 @@ function Write-CollectorEvent {
     Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
 }
 
+function Test-LauncherAlive {
+    if ($null -eq $launcherPid) { return $true }
+    try {
+        $parent = Get-Process -Id $launcherPid -ErrorAction Stop
+        return $parent.StartTime -eq $launcherStarted
+    } catch {
+        return $false
+    }
+}
+
 try {
+    # When spawned through wscript, remember the exact parent process instance.
+    # A stopped Scheduled Task can kill wscript while leaving PowerShell alive.
+    $self = Get-CimInstance Win32_Process -Filter "ProcessId = $PID"
+    if ($null -ne $self) {
+        $parentInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($self.ParentProcessId)"
+        if ($null -ne $parentInfo -and $parentInfo.Name -eq 'wscript.exe' -and
+            $parentInfo.CommandLine -like '*Launch-OnyxTelemetry.vbs*') {
+            $launcherPid = [int]$parentInfo.ProcessId
+            $launcherStarted = (Get-Process -Id $launcherPid -ErrorAction Stop).StartTime
+        }
+    }
     $locked = $mutex.WaitOne(0)
     if (-not $locked) { throw 'Collector already running in this Windows session.' }
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -49,6 +72,10 @@ try {
     Write-CollectorEvent INFO "Collector started; interval=${IntervalSeconds}s; count=$Count."
     $sequence = 0L
     while ($Count -eq 0 -or $sequence -lt $Count) {
+        if (-not (Test-LauncherAlive)) {
+            Write-CollectorEvent INFO 'Launcher exited; collector stopping.'
+            break
+        }
         $sequence++
         $outcome = $null
         try {
@@ -86,7 +113,16 @@ try {
                 break
             }
         }
-        if ($Count -eq 0 -or $sequence -lt $Count) { Start-Sleep -Seconds $IntervalSeconds }
+        if ($Count -eq 0 -or $sequence -lt $Count) {
+            # Check launcher liveness in short intervals to release the mutex promptly.
+            $remaining = $IntervalSeconds
+            while ($remaining -gt 0) {
+                if (-not (Test-LauncherAlive)) { break }
+                $slice = [math]::Min(2, $remaining)
+                Start-Sleep -Seconds $slice
+                $remaining -= $slice
+            }
+        }
     }
     Write-CollectorEvent INFO "Collector stopped; attempts=$sequence; failures=$failures."
     if ($failures -gt 0) { exit 1 }

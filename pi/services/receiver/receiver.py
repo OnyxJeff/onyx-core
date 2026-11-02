@@ -113,6 +113,7 @@ def handler_factory(token, store=None):
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "close")
             self.end_headers()
             try:
@@ -148,7 +149,7 @@ def handler_factory(token, store=None):
                 self.close_connection = True
                 return
             parsed = urlsplit(self.path)
-            if parsed.path not in ("/api/v1/history", "/api/v1/latest"):
+            if parsed.path not in ("/api/v1/history", "/api/v1/latest", "/api/v1/health"):
                 return self.respond(404, {"error": "not_found"})
             if not hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + token):
                 return self.respond(401, {"error": "unauthorized"})
@@ -156,6 +157,12 @@ def handler_factory(token, store=None):
             if target is None or not hasattr(target, "recent"):
                 return self.respond(503, {"error": "history_unavailable"})
             try:
+                if parsed.path == "/api/v1/health":
+                    if parsed.query:
+                        return self.respond(400, {"error": "invalid_query"})
+                    if not hasattr(target, "health"):
+                        return self.respond(503, {"error": "health_unavailable"})
+                    return self.respond(200, target.health())
                 if parsed.path == "/api/v1/latest":
                     if parsed.query:
                         return self.respond(400, {"error": "invalid_query"})

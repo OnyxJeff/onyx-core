@@ -124,6 +124,29 @@ def handler_factory(token, store=None):
         def do_GET(self):
             if self.path == "/healthz":
                 return self.respond(200, {"status": "ok"})
+            if self.path in ("/dashboard", "/dashboard/"):
+                target = store or getattr(self.server, "store", None)
+                if target is None or not hasattr(target, "recent"):
+                    return self.respond(404, {"error": "not_found"})
+                try:
+                    page = Path(__file__).with_name("dashboard.html").read_bytes()
+                except OSError:
+                    return self.respond(503, {"error": "dashboard_unavailable"})
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(page)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                try:
+                    self.wfile.write(page)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                self.close_connection = True
+                return
             parsed = urlsplit(self.path)
             if parsed.path not in ("/api/v1/history", "/api/v1/latest"):
                 return self.respond(404, {"error": "not_found"})

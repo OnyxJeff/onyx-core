@@ -1,4 +1,4 @@
-"""ONYX CORE prototype receiver: standard library only, no deployed service."""
+"""ONYX CORE USB telemetry receiver, v0.3.0: standard library only."""
 import argparse
 import hmac
 import ipaddress
@@ -100,7 +100,7 @@ class SnapshotStore:
 
 def handler_factory(token, store=None):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "OnyxCore/0.2-dev"
+        server_version = "OnyxCore/0.3.0"
         sys_version = ""
         timeout = 5
 
@@ -217,7 +217,7 @@ def main():
     parser.add_argument("--bind", required=True, help="Explicit Pi USB ICS IPv4 address")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--state-file", required=True)
-    parser.add_argument("--history-file", help="Optional v0.3 SQLite authoritative history; omit for v0.2 behavior")
+    parser.add_argument("--history-file", help="Optional SQLite authoritative history; omit for snapshot-only compatibility")
     args = parser.parse_args()
     try:
         address = ipaddress.IPv4Address(args.bind)

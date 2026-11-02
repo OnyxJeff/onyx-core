@@ -5,6 +5,7 @@ import ipaddress
 import json
 import math
 import os
+import sqlite3
 import tempfile
 import threading
 import uuid
@@ -153,7 +154,7 @@ def handler_factory(token, store=None):
                 return self.respond(503, {"error": "store_not_configured"})
             try:
                 accepted = target.accept(payload)
-            except OSError:
+            except (OSError, sqlite3.Error):
                 return self.respond(503, {"error": "storage_unavailable"})
             if not accepted:
                 return self.respond(409, {"error": "out_of_order_or_duplicate"})
@@ -167,6 +168,7 @@ def main():
     parser.add_argument("--bind", required=True, help="Explicit Pi USB ICS IPv4 address")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--state-file", required=True)
+    parser.add_argument("--history-file", help="Optional v0.3 SQLite authoritative history; omit for v0.2 behavior")
     args = parser.parse_args()
     try:
         address = ipaddress.IPv4Address(args.bind)
@@ -177,7 +179,14 @@ def main():
     token = os.environ.get("ONYXCORE_TOKEN", "")
     if len(token) < 32:
         parser.error("ONYXCORE_TOKEN must be securely provisioned (32+ characters)")
-    store = SnapshotStore(args.state_file)
+    if args.history_file:
+        try:
+            from .integrated_store import IntegratedStore
+        except ImportError:
+            from integrated_store import IntegratedStore
+        store = IntegratedStore(args.history_file, args.state_file)
+    else:
+        store = SnapshotStore(args.state_file)
     server = ThreadingHTTPServer((args.bind, args.port), handler_factory(token, store))
     server.daemon_threads = True
     print("Receiver listening on USB IPv4 only", flush=True)
@@ -185,6 +194,8 @@ def main():
         server.serve_forever()
     finally:
         server.server_close()
+        if args.history_file:
+            store.close()
 
 
 if __name__ == "__main__":

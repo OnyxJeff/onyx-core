@@ -1,5 +1,6 @@
 """Failure and restart tests for opt-in SQLite-authoritative telemetry."""
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -35,7 +36,8 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(self.store.accept(first))
         self.assertEqual(self.store.recent(1)[0]["sequence"], 1)
         self.assertEqual(json.loads(self.jsonfile.read_text())["sequence"], 1)
-        self.assertEqual(self.jsonfile.stat().st_mode & 0o777, 0o600)
+        if os.name == "posix":
+            self.assertEqual(self.jsonfile.stat().st_mode & 0o777, 0o600)
 
     def test_duplicate_and_new_session_ordering(self):
         now = datetime.now(timezone.utc).replace(microsecond=0)

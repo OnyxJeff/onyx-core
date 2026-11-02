@@ -1,16 +1,18 @@
-"""ONYX CORE prototype receiver: standard library only, no deployed service."""
+"""ONYX CORE USB telemetry receiver, v0.3.0: standard library only."""
 import argparse
 import hmac
 import ipaddress
 import json
 import math
 import os
+import sqlite3
 import tempfile
 import threading
 import uuid
 from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit, parse_qs
 
 MAX_BODY = 8192
 MAX_SKEW = timedelta(minutes=5)
@@ -98,7 +100,7 @@ class SnapshotStore:
 
 def handler_factory(token, store=None):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "OnyxCore/0.2-dev"
+        server_version = "OnyxCore/0.3.0"
         sys_version = ""
         timeout = 5
 
@@ -121,9 +123,57 @@ def handler_factory(token, store=None):
 
         def do_GET(self):
             if self.path == "/healthz":
-                self.respond(200, {"status": "ok"})
-            else:
-                self.respond(404, {"error": "not_found"})
+                return self.respond(200, {"status": "ok"})
+            if urlsplit(self.path).path in ("/dashboard", "/dashboard/"):
+                target = store or getattr(self.server, "store", None)
+                if target is None or not hasattr(target, "recent"):
+                    return self.respond(404, {"error": "not_found"})
+                try:
+                    page = Path(__file__).with_name("dashboard.html").read_bytes()
+                except OSError:
+                    return self.respond(503, {"error": "dashboard_unavailable"})
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(page)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                try:
+                    self.wfile.write(page)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                self.close_connection = True
+                return
+            parsed = urlsplit(self.path)
+            if parsed.path not in ("/api/v1/history", "/api/v1/latest"):
+                return self.respond(404, {"error": "not_found"})
+            if not hmac.compare_digest(self.headers.get("Authorization", ""), "Bearer " + token):
+                return self.respond(401, {"error": "unauthorized"})
+            target = store or getattr(self.server, "store", None)
+            if target is None or not hasattr(target, "recent"):
+                return self.respond(503, {"error": "history_unavailable"})
+            try:
+                if parsed.path == "/api/v1/latest":
+                    if parsed.query:
+                        return self.respond(400, {"error": "invalid_query"})
+                    latest = target.recent(limit=1)
+                    return self.respond(200, {"sample": latest[-1] if latest else None})
+                params = parse_qs(parsed.query, keep_blank_values=True)
+                if set(params) - {"limit"} or len(params.get("limit", ["120"])) != 1:
+                    return self.respond(400, {"error": "invalid_query"})
+                raw_limit = params.get("limit", ["120"])[0]
+                if not raw_limit.isascii() or not raw_limit.isdecimal() or len(raw_limit) > 3:
+                    return self.respond(400, {"error": "invalid_query"})
+                limit = int(raw_limit)
+                if not 1 <= limit <= 500:
+                    return self.respond(400, {"error": "invalid_query"})
+                samples = target.recent(limit=limit)
+                return self.respond(200, {"samples": samples, "count": len(samples)})
+            except (OSError, sqlite3.Error):
+                return self.respond(503, {"error": "history_unavailable"})
 
         def do_POST(self):
             if self.path != "/api/v1/telemetry":
@@ -153,7 +203,7 @@ def handler_factory(token, store=None):
                 return self.respond(503, {"error": "store_not_configured"})
             try:
                 accepted = target.accept(payload)
-            except OSError:
+            except (OSError, sqlite3.Error):
                 return self.respond(503, {"error": "storage_unavailable"})
             if not accepted:
                 return self.respond(409, {"error": "out_of_order_or_duplicate"})
@@ -167,6 +217,7 @@ def main():
     parser.add_argument("--bind", required=True, help="Explicit Pi USB ICS IPv4 address")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--state-file", required=True)
+    parser.add_argument("--history-file", help="Optional SQLite authoritative history; omit for snapshot-only compatibility")
     args = parser.parse_args()
     try:
         address = ipaddress.IPv4Address(args.bind)
@@ -177,7 +228,14 @@ def main():
     token = os.environ.get("ONYXCORE_TOKEN", "")
     if len(token) < 32:
         parser.error("ONYXCORE_TOKEN must be securely provisioned (32+ characters)")
-    store = SnapshotStore(args.state_file)
+    if args.history_file:
+        try:
+            from .integrated_store import IntegratedStore
+        except ImportError:
+            from integrated_store import IntegratedStore
+        store = IntegratedStore(args.history_file, args.state_file)
+    else:
+        store = SnapshotStore(args.state_file)
     server = ThreadingHTTPServer((args.bind, args.port), handler_factory(token, store))
     server.daemon_threads = True
     print("Receiver listening on USB IPv4 only", flush=True)
@@ -185,6 +243,8 @@ def main():
         server.serve_forever()
     finally:
         server.server_close()
+        if args.history_file:
+            store.close()
 
 
 if __name__ == "__main__":

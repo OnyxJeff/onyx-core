@@ -11,7 +11,10 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from .history import HistoryStore
+try:
+    from .history import HistoryStore
+except ImportError:
+    from history import HistoryStore  # direct /opt/onyxcore/receiver.py execution
 
 
 def _stamp(sample):

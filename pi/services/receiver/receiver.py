@@ -1,4 +1,4 @@
-"""ONYX CORE USB telemetry receiver, v0.3.0: standard library only."""
+"""ONYX CORE USB telemetry receiver, v0.5.0 development: standard library only."""
 import argparse
 import hmac
 import ipaddress
@@ -18,6 +18,10 @@ MAX_BODY = 8192
 MAX_SKEW = timedelta(minutes=5)
 KEYS = {"schema_version", "source", "session_id", "timestamp_utc", "sequence", "metrics"}
 METRICS = {"cpu_percent", "memory_used_percent", "uptime_seconds"}
+OPTIONAL_METRICS = {
+    "gpu_percent", "gpu_temp_c", "gpu_vram_used_mib", "gpu_vram_total_mib",
+    "network_rx_bps", "network_tx_bps", "cpu_temp_c",
+}
 
 
 def validate(payload, now=None, check_freshness=True):
@@ -49,7 +53,7 @@ def validate(payload, now=None, check_freshness=True):
     if check_freshness and abs(reference - parsed) > MAX_SKEW:
         raise ValueError("timestamp outside allowed skew")
     metrics = payload["metrics"]
-    if type(metrics) is not dict or set(metrics) != METRICS:
+    if type(metrics) is not dict or not METRICS.issubset(metrics) or set(metrics) - (METRICS | OPTIONAL_METRICS):
         raise ValueError("invalid metrics")
     for key in ("cpu_percent", "memory_used_percent"):
         val = metrics[key]
@@ -58,6 +62,23 @@ def validate(payload, now=None, check_freshness=True):
     up = metrics["uptime_seconds"]
     if type(up) is not int or not 0 <= up <= 2**63 - 1:
         raise ValueError("invalid uptime")
+    for key in OPTIONAL_METRICS & metrics.keys():
+        value = metrics[key]
+        if value is None:  # Unavailable sensor is distinct from zero.
+            continue
+        if type(value) not in (int, float) or not math.isfinite(value):
+            raise ValueError("invalid optional metric")
+        if key == "gpu_percent" and not 0 <= value <= 100:
+            raise ValueError("invalid gpu percentage")
+        if key in ("gpu_temp_c", "cpu_temp_c") and not -20 <= value <= 150:
+            raise ValueError("invalid temperature")
+        if key in ("gpu_vram_used_mib", "gpu_vram_total_mib") and not 0 <= value <= 1048576:
+            raise ValueError("invalid VRAM amount")
+        if key in ("network_rx_bps", "network_tx_bps") and not 0 <= value <= 1e12:
+            raise ValueError("invalid network rate")
+    used, total = metrics.get("gpu_vram_used_mib"), metrics.get("gpu_vram_total_mib")
+    if used is not None and total is not None and used > total:
+        raise ValueError("VRAM used exceeds total")
     return payload
 
 
@@ -100,7 +121,7 @@ class SnapshotStore:
 
 def handler_factory(token, store=None):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "OnyxCore/0.3.0"
+        server_version = "OnyxCore/0.5.0-dev"
         sys_version = ""
         timeout = 5
 

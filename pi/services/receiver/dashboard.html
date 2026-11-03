@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>ONYX CORE | SQUALL telemetry</title>
+<title>ONYX CORE | SQUALL telemetry — v0.5.0 Phase 3F</title>
 <style>
 :root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#e7eaf0;background:#0b1018}
 *{box-sizing:border-box}body{margin:0;padding:clamp(14px,3vw,32px);max-width:1100px;margin-inline:auto}
@@ -22,6 +22,108 @@ input{min-width:200px}button{cursor:pointer}button:hover{background:#334459}butt
 .legend{display:flex;gap:18px;flex-wrap:wrap}.legend span{font-size:.9rem}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
 footer{margin-top:22px;color:#9da9bb;font-size:.83rem}
+
+/* v0.5.0 Phase 2: explicit visual modes; existing receiver/API unchanged */
+body{width:100%;max-width:1100px;min-width:0}
+.layout{min-width:0}
+.panel{min-width:0}
+.value{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+#viewmode{min-width:150px}
+.mode-note{font-size:.82rem;color:#aebaca}
+body[data-view="portrait"]{max-width:560px}
+body[data-view="portrait"] .layout{grid-template-columns:repeat(2,minmax(0,1fr))}
+body[data-view="portrait"] .panel{padding:14px}
+body[data-view="portrait"] .value{font-size:clamp(1.3rem,5vw,2rem)}
+body[data-view="landscape"]{max-width:1600px}
+body[data-view="landscape"] .layout{grid-template-columns:repeat(4,minmax(0,1fr))}
+body[data-view="ultrawide"]{max-width:none;padding:clamp(10px,1.6vw,22px)}
+body[data-view="ultrawide"] .layout{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}
+body[data-view="ultrawide"] .panel{padding:12px}
+body[data-view="ultrawide"] .chart{height:115px}
+body[data-view="ultrawide"] footer{margin-top:12px}
+body[data-view="streaming"]{max-width:1280px;padding:12px}
+body[data-view="streaming"] h1{font-size:1.12rem}
+body[data-view="streaming"] .controls{margin-top:8px}
+body[data-view="streaming"] .layout{grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}
+body[data-view="streaming"] .panel{padding:12px;border-radius:10px}
+body[data-view="streaming"] .value{font-size:clamp(1.1rem,2.7vw,1.7rem);margin:6px 0 2px}
+body[data-view="streaming"] .chart{height:110px;margin-top:5px}
+body[data-view="streaming"] footer{margin-top:10px}
+/* Phase 3E: metrics, chart cards and layout-specific density */
+.metrics-title{font-size:1rem;letter-spacing:.06em;color:#aebaca;margin:20px 0 0}
+.extra-metrics{margin-top:10px}
+.metric-sub{color:#aebaca;font-size:.78rem;margin-top:2px;overflow-wrap:anywhere}
+.charts-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
+.chart-panel{min-width:0}
+.chart-panel h2{font-size:1.02rem;margin:0}
+.chart-panel p{margin:6px 0;font-size:.84rem}
+.chart-secondary{height:145px}
+.chart-empty{color:#aebaca;font-size:.8rem;min-height:1.2em}
+body[data-view="portrait"] .charts-grid{grid-template-columns:minmax(0,1fr)}
+body[data-view="portrait"] .extra-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+body[data-view="landscape"] .extra-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+body[data-view="ultrawide"] .extra-metrics{grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+body[data-view="ultrawide"] .charts-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:10px}
+body[data-view="ultrawide"] .chart-secondary{height:110px}
+body[data-view="streaming"] .extra-metrics{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+body[data-view="streaming"] .charts-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}
+body[data-view="streaming"] .chart-secondary{height:95px}
+body[data-view="streaming"] .metrics-title{margin-top:10px}
+body[data-view="streaming"] .chart-panel p{display:none}
+body[data-view="streaming"] .metric-sub{font-size:.7rem}
+@media(max-width:900px){body[data-view="ultrawide"] .extra-metrics,body[data-view="streaming"] .extra-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:720px){body[data-view] .charts-grid{grid-template-columns:minmax(0,1fr)}body[data-view="ultrawide"] .extra-metrics,body[data-view="streaming"] .extra-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:720px){
+ body[data-view="landscape"] .layout,body[data-view="ultrawide"] .layout,body[data-view="streaming"] .layout{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .controls{gap:8px}
+ input{min-width:0;max-width:100%}
+}
+@media(max-width:370px){body[data-view] .layout{grid-template-columns:minmax(0,1fr)}}
+
+/* v0.5.0 Phase 3F — display-only improvements; API/authentication untouched. */
+/* The 800-unit SVG viewBox is a coordinate system, not a pixel-width cap.
+   Stretch the plotting surface to its panel rather than letterboxing it. */
+.chart{max-width:none;min-width:0;overflow:visible}
+.chartline,.chart path{vector-effect:non-scaling-stroke}
+.chart line{vector-effect:non-scaling-stroke}
+.charts-grid>.panel{min-width:0}
+/* Keep landscape comfortable while using full panel width for charts. */
+body[data-view="landscape"] .charts-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+body[data-view="landscape"] .chart{height:170px}
+body[data-view="landscape"] .chart-secondary{height:145px}
+/* Ultrawide: compact cards, wider full-width trend and three equal mini-charts. */
+body[data-view="ultrawide"] .chart{height:142px}
+body[data-view="ultrawide"] .chart-secondary{height:122px}
+body[data-view="ultrawide"] .panel{min-width:0}
+/* Streaming is a compact dashboard preview, NOT a token-free OBS endpoint.
+   Hide detailed charts and optional/diagnostic cards, but keep the layout
+   selector and authorized status visible so users can return to full modes. */
+body[data-view="streaming"] .mode-note,
+body[data-view="streaming"] footer,
+body[data-view="streaming"] .metrics-title,
+body[data-view="streaming"] .charts-grid,
+body[data-view="streaming"] #usage-panel,
+body[data-view="streaming"] #health-detail,
+body[data-view="streaming"] #health-event,
+body[data-view="streaming"] #message,
+body[data-view="streaming"] #sample-time-card,
+body[data-view="streaming"] #cpu-temp-card{display:none}
+body[data-view="streaming"] .layout{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:10px}
+body[data-view="streaming"] .extra-metrics{grid-template-columns:repeat(5,minmax(0,1fr));margin-top:10px}
+body[data-view="streaming"] .controls{gap:7px}
+body[data-view="streaming"] .panel{padding:12px}
+body[data-view="streaming"] .value{font-size:clamp(1.05rem,2.35vw,1.7rem);line-height:1.12}
+body[data-view="streaming"] #health-panel{margin-top:10px!important;padding:10px 12px}
+body[data-view="streaming"] #health-panel .label{font-size:.75rem}
+@media(max-width:900px){
+ body[data-view="streaming"] .extra-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:720px){
+ body[data-view="landscape"] .charts-grid{grid-template-columns:minmax(0,1fr)}
+ body[data-view="streaming"] .layout{grid-template-columns:repeat(2,minmax(0,1fr))}
+ body[data-view="streaming"] .extra-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:370px){body[data-view="streaming"] .layout,body[data-view="streaming"] .extra-metrics{grid-template-columns:minmax(0,1fr)}}
 </style>
 </head>
 <body>
@@ -29,21 +131,37 @@ footer{margin-top:22px;color:#9da9bb;font-size:.83rem}
 <div class="controls">
 <label for="token">Read API token</label><input type="password" id="token" autocomplete="off" placeholder="Paste bearer token">
 <button id="connect">Connect</button><button id="disconnect">Disconnect</button>
+<label for="viewmode">Layout</label><select id="viewmode" aria-label="Dashboard layout"><option value="portrait">Portrait · 1080×1920</option><option value="landscape" selected>Landscape · 1920×1080</option><option value="ultrawide">Ultrawide · 2560×720</option><option value="streaming">Streaming · 1280×720</option></select>
 <label for="range">Samples</label><select id="range"><option value="60">60 (~30 min)</option><option value="120" selected>120 (~1 hour)</option><option value="500">500 (~4 hours)</option></select>
 </div>
+<p class="mode-note">Layout selection is manual. Only the layout preference is saved in this browser; the API token is never saved.</p>
 <p id="message" aria-live="polite">The token stays in this browser tab's memory only. It is not saved in local storage.</p>
 <section class="layout" aria-label="Latest telemetry">
 <div class="panel"><div class="label">CPU</div><div class="value" id="cpu">—</div></div>
 <div class="panel"><div class="label">Memory</div><div class="value" id="memory">—</div></div>
 <div class="panel"><div class="label">Host uptime</div><div class="value" id="uptime">—</div></div>
-<div class="panel"><div class="label">Last sample (local)</div><div class="value" id="freshness" style="font-size:1.05rem;overflow-wrap:anywhere">—</div></div>
+<div class="panel" id="sample-time-card"><div class="label">Last sample (local)</div><div class="value" id="freshness" style="font-size:1.05rem;overflow-wrap:anywhere">—</div></div>
 </section>
-<section class="panel" style="margin-top:14px" aria-label="Health alerts"><div class="label">TELEMETRY HEALTH</div><div id="health-state" class="status stale">Not connected</div><p id="health-detail" aria-live="polite">Connect to check telemetry freshness.</p><p id="health-event" aria-live="polite"></p></section>
-<section class="panel" style="margin-top:14px">
+<h2 class="metrics-title">GPU &amp; NETWORK</h2>
+<section class="layout extra-metrics" aria-label="Expanded telemetry">
+<div class="panel"><div class="label">GPU utilization</div><div class="value" id="gpu">—</div></div>
+<div class="panel"><div class="label">GPU temperature</div><div class="value" id="gpu-temp">—</div></div>
+<div class="panel"><div class="label">VRAM used</div><div class="value" id="vram">—</div><div class="metric-sub" id="vram-detail">No readings yet</div></div>
+<div class="panel"><div class="label">Network receive</div><div class="value" id="net-rx">—</div><div class="metric-sub">Intel I211 · Ethernet</div></div>
+<div class="panel"><div class="label">Network transmit</div><div class="value" id="net-tx">—</div><div class="metric-sub">Intel I211 · Ethernet</div></div>
+<div class="panel" id="cpu-temp-card"><div class="label">CPU temperature</div><div class="value" id="cpu-temp">—</div><div class="metric-sub">Awaiting verified sensor source</div></div>
+</section>
+<section class="panel" id="health-panel" style="margin-top:14px" aria-label="Health alerts"><div class="label">TELEMETRY HEALTH</div><div id="health-state" class="status stale">Not connected</div><p id="health-detail" aria-live="polite">Connect to check telemetry freshness.</p><p id="health-event" aria-live="polite"></p></section>
+<section class="panel" id="usage-panel" style="margin-top:14px">
 <h2 style="font-size:1.1rem;margin:0">Recent usage</h2>
 <p>CPU and memory percentage · oldest to newest</p>
-<svg class="chart" id="chart" viewBox="0 0 800 180" role="img" aria-label="CPU and memory telemetry history"></svg>
+<svg class="chart" id="chart" viewBox="0 0 800 180" preserveAspectRatio="none" role="img" aria-label="CPU and memory telemetry history"></svg>
 <div class="legend"><span><i class="dot" style="background:#61dab6"></i>CPU</span><span><i class="dot" style="background:#ad9cff"></i>Memory</span></div>
+</section>
+<section class="charts-grid" aria-label="Expanded telemetry history">
+<div class="panel chart-panel"><h2>GPU utilization</h2><p>Percent · missing historic readings omitted</p><svg class="chart chart-secondary" id="gpu-chart" viewBox="0 0 800 180" preserveAspectRatio="none" role="img" aria-label="GPU utilization history"></svg><div class="chart-empty" id="gpu-chart-empty"></div></div>
+<div class="panel chart-panel"><h2>GPU temperature</h2><p>Degrees Celsius · sensor readings only</p><svg class="chart chart-secondary" id="temp-chart" viewBox="0 0 800 180" preserveAspectRatio="none" role="img" aria-label="GPU temperature history"></svg><div class="chart-empty" id="temp-chart-empty"></div></div>
+<div class="panel chart-panel"><h2>Ethernet traffic</h2><p>Receive and transmit · bits/second</p><svg class="chart chart-secondary" id="network-chart" viewBox="0 0 800 180" preserveAspectRatio="none" role="img" aria-label="Network throughput history"></svg><div class="legend"><span><i class="dot" style="background:#61dab6"></i>RX</span><span><i class="dot" style="background:#ffbe69"></i>TX</span></div><div class="chart-empty" id="network-chart-empty"></div></div>
 </section>
 <footer>Refreshes every 30 seconds. Local-only dashboard; API authorization required. No third-party assets.</footer>
 <script>
@@ -73,6 +191,76 @@ dot.setAttribute('fill',klass==='cpu'?'#61dab6':'#ad9cff');
 svg.append(dot);
 }
 }
+}
+// Null/unavailable metrics remain unavailable: never coerce null to zero.
+const metricNumber=(obj,key)=>{const v=obj&&obj[key];return typeof v==='number'&&Number.isFinite(v)?v:null;};
+const percent=v=>v===null?'—':v.toFixed(1)+'%';
+const temperature=v=>v===null?'—':v.toFixed(1)+'°C';
+function bitrate(v){
+ if(v===null)return '—';
+ if(v>=1e9)return (v/1e9).toFixed(2)+' Gbps';
+ if(v>=1e6)return (v/1e6).toFixed(2)+' Mbps';
+ if(v>=1e3)return (v/1e3).toFixed(1)+' kbps';
+ return Math.round(v)+' bps';
+}
+function updateExpanded(metrics){
+ const gpu=metricNumber(metrics,'gpu_percent');
+ const temp=metricNumber(metrics,'gpu_temp_c');
+ const cpuTemp=metricNumber(metrics,'cpu_temp_c');
+ const used=metricNumber(metrics,'gpu_vram_used_mib');
+ const total=metricNumber(metrics,'gpu_vram_total_mib');
+ $('gpu').textContent=percent(gpu);
+ $('gpu-temp').textContent=temperature(temp);
+ $('cpu-temp').textContent=temperature(cpuTemp);
+ $('net-rx').textContent=bitrate(metricNumber(metrics,'network_rx_bps'));
+ $('net-tx').textContent=bitrate(metricNumber(metrics,'network_tx_bps'));
+ $('vram').textContent=used===null?'—':Math.round(used).toLocaleString()+' MiB';
+ $('vram-detail').textContent=used!==null&&total!==null&&total>0?
+  'of '+Math.round(total).toLocaleString()+' MiB · '+(100*used/total).toFixed(1)+'%':'No complete VRAM reading';
+}
+function historyChart(svgId,emptyId,samples,keys,colors,{min=0,max=null}={}){
+ const svg=$(svgId);svg.replaceChildren();
+ const ns='http://www.w3.org/2000/svg',w=800,h=180,p=14;
+ const all=keys.flatMap(key=>samples.map(s=>metricNumber(s.metrics,key)).filter(v=>v!==null));
+ if(!all.length){$(emptyId).textContent='No readings in selected history window';return;}
+ $(emptyId).textContent='';
+ const hi=max!==null?max:Math.max(1,...all)*1.1;
+ const lo=min;
+ for(const f of [.25,.5,.75]){
+  const el=document.createElementNS(ns,'line');
+  el.setAttribute('x1','0');el.setAttribute('x2',String(w));
+  const y=h-p-(h-2*p)*f;
+  el.setAttribute('y1',String(y));el.setAttribute('y2',String(y));
+  el.setAttribute('stroke','#364258');el.setAttribute('stroke-dasharray','4 6');svg.append(el);
+ }
+ keys.forEach((key,k)=>{
+  let path='',open=false;
+  samples.forEach((sample,i)=>{
+   const v=metricNumber(sample.metrics,key);
+   if(v===null){open=false;return;}
+   const x=p+(w-2*p)*i/Math.max(samples.length-1,1);
+   const y=h-p-(h-2*p)*(Math.max(lo,Math.min(hi,v))-lo)/Math.max(hi-lo,1);
+   path+=(open?' L':' M')+x.toFixed(2)+' '+y.toFixed(2);open=true;
+  });
+  if(!path)return;
+  const el=document.createElementNS(ns,'path');el.setAttribute('d',path);
+  el.setAttribute('fill','none');el.setAttribute('stroke',colors[k]);
+  el.setAttribute('stroke-width','2.8');el.setAttribute('stroke-linecap','round');svg.append(el);
+  // A single measurement should be visible even without another sample to form a line.
+  if(samples.length===1 || samples.filter(s=>metricNumber(s.metrics,key)!==null).length===1){
+   const index=samples.findIndex(s=>metricNumber(s.metrics,key)!==null);
+   const v=metricNumber(samples[index].metrics,key);
+   const dot=document.createElementNS(ns,'circle');
+   dot.setAttribute('cx',String(p+(w-2*p)*index/Math.max(samples.length-1,1)));
+   dot.setAttribute('cy',String(h-p-(h-2*p)*(Math.max(lo,Math.min(hi,v))-lo)/Math.max(hi-lo,1)));
+   dot.setAttribute('r','4');dot.setAttribute('fill',colors[k]);svg.append(dot);
+  }
+ });
+}
+function updateExpandedCharts(samples){
+ historyChart('gpu-chart','gpu-chart-empty',samples,['gpu_percent'],['#61dab6'],{max:100});
+ historyChart('temp-chart','temp-chart-empty',samples,['gpu_temp_c'],['#ffbe69'],{max:110});
+ historyChart('network-chart','network-chart-empty',samples,['network_rx_bps','network_tx_bps'],['#61dab6','#ffbe69']);
 }
 function showHealth(state,detail){
 const display={healthy:['HEALTHY','ok'],warning:['WARNING','stale'],critical:['CRITICAL','bad'],no_data:['NO DATA','stale'],unknown:['UNKNOWN','stale'],degraded:['DEGRADED','bad'],receiver_unreachable:['RECEIVER UNREACHABLE','bad']};
@@ -107,6 +295,8 @@ $('message').textContent='API error HTTP '+code;return;
 const [result,health]=await Promise.all([historyResponse.json(),healthResponse.json()]);
 const samples=Array.isArray(result.samples)?result.samples:[],last=samples[samples.length-1];
 chart(samples);
+updateExpandedCharts(samples);
+updateExpanded(last?last.metrics:null);
 if(last){
 $('cpu').textContent=Number(last.metrics.cpu_percent).toFixed(1)+'%';
 $('memory').textContent=Number(last.metrics.memory_used_percent).toFixed(1)+'%';
@@ -128,12 +318,24 @@ status(state==='healthy'?'LIVE':state.toUpperCase(),state==='healthy'?'ok':state
 $('message').textContent=samples.length+' samples shown · last fetch '+new Date().toLocaleTimeString();
 }catch(error){
 status('UNREACHABLE','bad');
-showHealth('receiver_unreachable','Cannot reach the receiver; CPU, memory and chart values are last known, not live. Check USB connection and service.');
+showHealth('receiver_unreachable','Cannot reach the receiver; telemetry and chart values are last known, not live. Check USB connection and service.');
 $('message').textContent='Receiver request failed; displaying last known readings and retrying on next refresh.';
 }finally{busy=false;}
 }
 $('connect').addEventListener('click',()=>{token=$('token').value;$('token').value='';if(!token){status('TOKEN REQUIRED','stale');return;}if(timer)clearInterval(timer);poll();timer=setInterval(poll,30000);});
 $('disconnect').addEventListener('click',()=>{token='';previousHealth=null;$('health-event').textContent='';showHealth('no_data','Disconnected; monitoring paused.');$('token').value='';if(timer)clearInterval(timer);timer=null;status('DISCONNECTED','stale');$('message').textContent='Token cleared from dashboard memory.';});
+// Visual layout preference only. Never persist the authentication token.
+const modes=new Set(['portrait','landscape','ultrawide','streaming']);
+let savedMode='landscape';
+try{const stored=localStorage.getItem('onyxcore-layout');if(modes.has(stored))savedMode=stored;}catch(_){}
+function setMode(mode){
+ if(!modes.has(mode))return;
+ document.body.dataset.view=mode;
+ $('viewmode').value=mode;
+ try{localStorage.setItem('onyxcore-layout',mode);}catch(_){}
+}
+setMode(savedMode);
+$('viewmode').addEventListener('change',()=>setMode($('viewmode').value));
 $('range').addEventListener('change',poll);
 })();
 </script>

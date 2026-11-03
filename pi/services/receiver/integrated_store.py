@@ -1,4 +1,4 @@
-"""SQLite-authoritative receiver store. Experimental v0.3.0; not deployed.
+"""SQLite-authoritative receiver store. ONYX CORE v0.5.0 development.
 
 The database transaction is the acceptance boundary; the latest JSON is a
 best-effort compatibility cache rebuilt from committed SQLite state.

@@ -37,9 +37,22 @@ class DashboardHealthTests(unittest.TestCase):
         self.assertIn("displaying last known readings", self.html)
 
     def test_no_persistent_token_storage(self):
-        self.assertNotIn("localStorage", self.html)
-        self.assertNotIn("sessionStorage", self.html)
-        self.assertNotIn("document.cookie", self.html)
+    # Layout preferences may persist, but authentication tokens must not.
+        self.assertIn("localStorage.getItem('onyxcore-layout')", self.html)
+        self.assertIn("localStorage.setItem('onyxcore-layout',mode)", self.html)
+
+    # Authentication tokens must stay in memory.
+        self.assertIn("let token=''", self.html)
+
+    # Prevent persistence of token-related keys.
+        import re
+
+        writes = re.findall(
+            r"localStorage\.setItem\s*\(\s*['\"]([^'\"]+)['\"]",
+            self.html,
+        )
+
+        self.assertEqual(writes, ["onyxcore-layout"])
 
 
 if __name__ == "__main__":

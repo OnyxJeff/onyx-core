@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>ONYX CORE | OBS overlay</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#edf5fa;background:transparent}
+*{box-sizing:border-box}
+html,body{width:100%;height:100%;margin:0;background:transparent!important;overflow:hidden}
+body{padding:18px}
+/* 1280 × 720 transparent OBS canvas. Only the HUD bar is painted. */
+.hud{display:flex;align-items:stretch;gap:0;width:max-content;max-width:100%;min-height:96px;background:rgba(10,17,27,.91);border:1px solid rgba(102,131,154,.44);border-left:4px solid #61dab6;border-radius:12px;box-shadow:0 9px 26px rgba(0,0,0,.4);overflow:hidden}
+.identity{width:134px;display:flex;flex-direction:column;justify-content:center;padding:11px 13px;border-right:1px solid #2a3544}
+.brand{font-weight:850;letter-spacing:.12em;font-size:14px;white-space:nowrap}
+.caption{color:#99aabb;font-size:10px;letter-spacing:.13em;margin-top:5px}
+.state{color:#61dab6;display:flex;gap:6px;align-items:center;font-size:11px;font-weight:700;margin-top:7px}
+.pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor}
+.metrics{display:flex;align-items:stretch}
+.metric{width:113px;display:flex;flex-direction:column;justify-content:center;gap:3px;padding:11px 12px;border-right:1px solid #2a3544;white-space:nowrap}
+.metric:last-child{border-right:0}
+.label{color:#9cadc0;font-size:10px;letter-spacing:.09em;text-transform:uppercase;font-weight:650}
+.value{font-size:23px;font-weight:760;font-variant-numeric:tabular-nums;line-height:1.15}
+.detail{font-size:10px;color:#a4b6c5;min-height:12px;font-variant-numeric:tabular-nums}
+.metric.vram{width:134px}.metric.net{width:165px}
+.metric.net .value{font-size:15px}.metric.net .detail{font-size:12px}
+.hud.warn{border-left-color:#ffbe69}.hud.warn .state{color:#ffbe69}
+.hud.bad{border-left-color:#ff8787}.hud.bad .state{color:#ff8787}
+.hud.warn .metrics,.hud.bad .metrics{opacity:.72}
+@media(max-width:900px){body{padding:8px}.hud{transform-origin:top left;transform:scale(.77)}}
+</style>
+</head>
+<body>
+<main class="hud warn" id="hud" aria-label="ONYX CORE streaming telemetry">
+  <section class="identity"><div class="brand">ONYX CORE</div><div class="caption">SQUALL // LIVE</div><div class="state" id="state" role="status"><span class="pulse"></span><span id="state-text">CONNECTING</span></div></section>
+  <div class="metrics">
+    <section class="metric"><div class="label">CPU</div><div class="value" id="cpu">—</div><div class="detail">UTILIZATION</div></section>
+    <section class="metric"><div class="label">RAM</div><div class="value" id="ram">—</div><div class="detail">SYSTEM MEMORY</div></section>
+    <section class="metric"><div class="label">GPU</div><div class="value" id="gpu">—</div><div class="detail">UTILIZATION</div></section>
+    <section class="metric"><div class="label">GPU TEMP</div><div class="value" id="temp">—</div><div class="detail">CELSIUS</div></section>
+    <section class="metric vram"><div class="label">VRAM</div><div class="value" id="vram">—</div><div class="detail" id="vram-detail">USED / TOTAL</div></section>
+    <section class="metric net"><div class="label">ETHERNET</div><div class="value" id="rx">↓ —</div><div class="detail" id="tx">↑ —</div></section>
+  </div>
+</main>
+<script>
+(()=>{'use strict';
+const $=id=>document.getElementById(id);
+const fmtPct=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(0)+'%':'—';
+const fmtTemp=v=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(0)+'°C':'—';
+const fmtRate=v=>{
+ if(typeof v!=='number'||!Number.isFinite(v)||v<0)return '—';
+ if(v>=1e9)return (v/1e9).toFixed(2)+' Gb/s';
+ if(v>=1e6)return (v/1e6).toFixed(2)+' Mb/s';
+ if(v>=1e3)return (v/1e3).toFixed(1)+' kb/s';
+ return v.toFixed(0)+' b/s';
+};
+function status(label,klass){$('hud').className='hud '+klass;$('state-text').textContent=label;}
+async function readJSON(path){const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),4500);try{const response=await fetch(path,{cache:'no-store',signal:controller.signal,credentials:'omit'});if(!response.ok)throw Error('unavailable');return await response.json();}finally{clearTimeout(timeout);}}
+let busy=false;
+async function refresh(){
+ if(busy)return;busy=true;
+ try{
+  const [latest,health]=await Promise.all([readJSON('/api/v1/latest'),readJSON('/api/v1/health')]);
+  const sample=latest&&latest.sample, m=sample&&sample.metrics;
+  if(!m){status('NO DATA','warn');return;}
+  $('cpu').textContent=fmtPct(m.cpu_percent);$('ram').textContent=fmtPct(m.memory_used_percent);
+  $('gpu').textContent=fmtPct(m.gpu_percent);$('temp').textContent=fmtTemp(m.gpu_temp_c);
+  const used=m.gpu_vram_used_mib,total=m.gpu_vram_total_mib;
+  $('vram').textContent=typeof used==='number'&&Number.isFinite(used)?(used/1024).toFixed(1)+' GiB':'—';
+  $('vram-detail').textContent=typeof total==='number'&&Number.isFinite(total)?'OF '+(total/1024).toFixed(0)+' GiB':'USED / TOTAL';
+  $('rx').textContent='↓ '+fmtRate(m.network_rx_bps);$('tx').textContent='↑ '+fmtRate(m.network_tx_bps);
+  if(health.status==='healthy'){
+   const age=Number.isFinite(health.age_seconds)?' · '+health.age_seconds+'s':' ';
+   status('LIVE'+age,'');
+  }else if(health.status==='warning')status('STALE','warn');
+  else if(health.status==='critical')status('OFFLINE','bad');
+  else status('NO SIGNAL','warn');
+ }catch(_){status('UNREACHABLE','bad');}
+ finally{busy=false;}
+}
+refresh();setInterval(refresh,15000);
+})();
+</script>
+</body>
+</html>

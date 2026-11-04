@@ -1,49 +1,161 @@
 # ONYX CORE
 
-USB-connected telemetry companion platform for an original Raspberry Pi Zero Rev 1.3 (ARMv6), collecting live measurements from the Windows 11 host SQUALL.
+**USB-connected desktop telemetry companion for Windows 11 and an original Raspberry Pi Zero (ARMv6).**
 
-## Current release: v0.3.0 — SQLite history and dashboard
+[![Latest release](https://img.shields.io/github/v/release/OnyxJeff/onyx-core?label=release)](https://github.com/OnyxJeff/onyx-core/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Windows%2011%20%2B%20Raspberry%20Pi-blue)](https://github.com/OnyxJeff/onyx-core)
+[![Development](https://img.shields.io/badge/status-active%20development-orange)](https://github.com/OnyxJeff/onyx-core/releases)
 
-- Windows collector transmits CPU utilization, memory utilization and uptime over the private USB RNDIS/ICS link.
-- Pi receiver authenticates bearer-token requests, writes accepted samples to SQLite and maintains a JSON latest-snapshot compatibility cache.
-- Durable acceptance watermark protects replay ordering even after seven-day history pruning.
-- Local dashboard charts history and current usage; updates approximately every 30 seconds.
-- Standard-library Python receiver; no runtime PyPI dependencies.
+ONYX CORE collects hardware telemetry from a Windows gaming and streaming PC over a private USB Ethernet gadget connection, stores readings on a Raspberry Pi Zero, and presents them through desktop and streaming dashboards. The reference deployment monitors **SQUALL**, a Windows 11 PC with an AMD Ryzen 7 5800X and NVIDIA GeForce RTX 3070 Ti, using **svr-onyxcore**, an original Raspberry Pi Zero Rev 1.3.
 
-The production Pi service listens only on its `192.168.137.x` USB address, TCP `8765`. Use `http://<Pi-USB-IP>:8765/dashboard` from the attached Windows host, and paste the existing token **locally** into the dashboard. This is HTTP on a private USB link; do **not** port-forward it to your LAN or the internet.
+**Current release: [v0.5.0 — Desktop Companion & Streaming](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)**
 
-## Validation
+## Features
 
-34 regression/integration tests passed on both Windows and original Pi Zero ARMv6; live authenticated dashboard, SQLite integrity and production collector writes verified. See [deployment and rollback](docs/v0.3.0-deployment-rollback-draft.md) for evidence, paths and limitations.
+### Hardware telemetry
 
-Run tests from the repo root:
+| Metric | Source |
+| --- | --- |
+| CPU utilization and RAM usage | Windows PowerShell collector |
+| CPU temperature | LibreHardwareMonitor `Core (Tctl/Tdie)` sensor |
+| GPU utilization, temperature and VRAM | NVIDIA `nvidia-smi` |
+| Ethernet receive / transmit throughput | Windows collector |
+| Host uptime | Windows collector |
+
+The Windows collector sends authenticated samples roughly every 30 seconds. Optional sensor failures do not stop other available metrics from being reported.
+
+### Dashboards and streaming
+
+- **Portrait, Landscape and Ultrawide** desktop layouts.
+- **Streaming** layout optimized for 1280×720, including CPU temperature, GPU and network metrics.
+- Local Windows dashboard: `http://127.0.0.1:18766/dashboard`.
+- OBS-compatible browser overlay: `http://127.0.0.1:18766/overlay`.
+- Standalone Raspberry Pi dashboard: `http://<PI_USB_IP>:8765/dashboard`.
+
+The Streaming dashboard and the separate OBS overlay are distinct interfaces. CPU temperature is included in the Streaming dashboard but not yet in the OBS overlay.
+
+### Raspberry Pi receiver
+
+- Authenticated telemetry ingestion and read-only latest/history API.
+- SQLite telemetry history and JSON latest-snapshot compatibility cache.
+- Durable replay/acceptance watermark, including after history pruning.
+- Telemetry freshness monitoring and health alerts.
+- Standard-library Python implementation without runtime PyPI dependencies.
+
+## Architecture
+
+```text
+Windows 11 — SQUALL
+  ├─ PowerShell collector
+  │    ├─ CPU, RAM, uptime
+  │    ├─ NVIDIA GPU, temperature, VRAM
+  │    ├─ Ethernet throughput
+  │    └─ LibreHardwareMonitor CPU temperature
+  │           │
+  │           └─ Authenticated telemetry over private USB RNDIS / ICS
+  │                         │
+  │                         ▼
+  │                Raspberry Pi Zero — svr-onyxcore
+  │                  ├─ Python receiver (TCP 8765, USB-bound)
+  │                  ├─ SQLite history + snapshot cache
+  │                  ├─ Replay protection + health monitoring
+  │                  └─ Standalone dashboard
+  │
+  └─ Python localhost gateway (127.0.0.1:18766)
+       ├─ Desktop / Streaming dashboard
+       ├─ OBS browser overlay
+       └─ Authenticated upstream reads from Pi receiver
+```
+
+Communication uses USB Ethernet gadget networking (RNDIS) and Windows Internet Connection Sharing. In the current deployment, the USB link uses the private `192.168.137.0/24` network; this subnet is **deployment-specific**, not a universal configuration requirement.
+
+The receiver listens only on the Pi's configured USB interface (port `8765`), and the Windows browser gateway binds to loopback (port `18766`). The gateway handles upstream authentication so browser pages do not need the receiver bearer token.
+
+**Security note:** The private USB link uses HTTP, not TLS. Do not port-forward the receiver or gateway to LAN/WAN, and never commit bearer tokens, environment files, databases, or credentials.
+
+## Reference hardware and software
+
+| Component | Reference deployment |
+| --- | --- |
+| Receiver | Original Raspberry Pi Zero Rev 1.3 (ARMv6), 32 GB microSD |
+| Pi OS | 32-bit Raspberry Pi OS |
+| Receiver runtime | Python 3 / systemd / SQLite |
+| Windows host | Windows 11 / PowerShell 5.1 |
+| Gateway runtime | Python 3 |
+| CPU / GPU | AMD Ryzen 7 5800X / NVIDIA GeForce RTX 3070 Ti |
+| CPU temperature provider | LibreHardwareMonitor HTTP JSON server |
+| Connectivity | USB gadget RNDIS + Windows ICS |
+
+The CPU temperature implementation currently uses a configured LibreHardwareMonitor endpoint and the exact Ryzen `Core (Tctl/Tdie)` sensor path. It is not yet general-purpose automatic sensor discovery.
+
+## Testing and validation
+
+From the repository root:
+
+**Receiver regression tests**
 
 ```bash
 python3 -m unittest discover -s tests/services -p 'test_*.py' -v
 ```
 
-## Development principles
+**Windows gateway tests**
 
-- GitHub is the source of truth.
+```powershell
+python .\windows\gateway\Test-OnyxGateway.py
+```
+
+**CPU temperature integration tests**
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\windows\collector\Test-OnyxCpuTemperature.ps1"
+```
+
+In v0.5.0 testing, **52 receiver**, **16 gateway**, and **7 CPU-temperature integration** tests passed (**75 automated checks**). Collector dry runs, GPU/network probes, live CPU temperature ingestion, Windows gateway delivery, Raspberry Pi receiver health, and deployed dashboards were also verified.
+
+**Not yet verified:** Windows startup/reboot recovery, automatic LibreHardwareMonitor startup, and recovery following a temporary USB-network interruption.
+
+## Development and security principles
+
+- GitHub is the source of truth; keep release history in version tags.
 - No secrets in Git or logs.
-- Separate isolated tests from production and preserve tested deployment artifacts.
-- Small, versioned releases with explicit rollback instructions.
-- Prefer standard-library dependencies and hardware-conscious operation.
+- Test in isolation before controlled deployment to production.
+- Preserve backups and documented rollback paths.
+- Prefer small, auditable releases and ARMv6-conscious dependencies.
+- Keep the receiver and browser gateway off public networks.
 
-## Hardware
+## Release history
 
-- Raspberry Pi Zero Rev 1.3 / ARMv6, 32 GB microSD
-- USB RNDIS/ICS connection to Windows 11 SQUALL
+| Version | Milestone |
+| --- | --- |
+| [v0.1.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.1.0) | USB Foundation |
+| [v0.2.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.2.0) | USB Telemetry Foundation |
+| [v0.3.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.3.0) | Telemetry History & Dashboard |
+| [v0.4.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.4.0) | Health Monitoring & Local Alerts |
+| **[v0.5.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)** | **Desktop Companion & Streaming — latest release** |
+| v1.0.0 | Planned stable installation and maintenance baseline |
 
-## Roadmap
+See [all releases](https://github.com/OnyxJeff/onyx-core/releases) for detailed release notes.
 
-- v0.1.0: USB networking foundation
-- v0.2.0: authenticated telemetry collector and receiver
-- **v0.3.0: SQLite history and dashboard**
-- v0.4.0: health monitoring and alerts
-- v0.5.0: operational resilience
-- v1.0.0: stable installation and maintenance baseline
+## Known limitations and roadmap
 
-For environment-specific startup failures on Raspberry Pi USB gadget/RNDIS and Windows Internet Connection Sharing, see the [USB gadget / ICS troubleshooting runbook](docs/troubleshooting/usb-gadget-networking.md) (tracked in [issue #10](https://github.com/OnyxJeff/onyx-core/issues/10)). It documents verified symptoms, safe diagnostics, recovery, rollback and limitations; it is **not** required setup for every installation.
+- LibreHardwareMonitor must be running with its HTTP JSON endpoint enabled for CPU temperature collection.
+- CPU sensor endpoint/path configuration is currently reference-host-specific.
+- CPU temperature is not yet displayed in the separate OBS overlay.
+- Windows automatic startup and reboot recovery remain to be validated.
+- Temporary USB-network failure/reconnection recovery remains to be validated.
+- Future work includes more portable sensor discovery, overlay customization, operational documentation, and a stable v1.0.0 installation/maintenance baseline.
 
-See the `docs/` directory for operational guidance.
+## Documentation and troubleshooting
+
+See the [`docs/` directory](docs/) for operational guidance. The [USB gadget / Windows ICS troubleshooting runbook](docs/troubleshooting/usb-gadget-networking.md) covers observed environment-specific failures, read-only diagnostics, safe recovery, and rollback; it is **not** a required setup step for every installation (see [issue #10](https://github.com/OnyxJeff/onyx-core/issues/10)).
+
+## Project links
+
+- [Source repository](https://github.com/OnyxJeff/onyx-core)
+- [v0.5.0 release notes](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)
+- [OnyxNet infrastructure portfolio](https://onyxnet.live)
+- [OnyxJeff creator / streaming website](https://onyxjeff.live)
+
+---
+
+*ONYX CORE is developed and maintained by OnyxJeff.*

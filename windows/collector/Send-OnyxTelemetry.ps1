@@ -1,4 +1,4 @@
-# ONYX CORE v0.5.0 - development collector; not the production scheduled-task target.
+﻿# ONYX CORE v0.5.0 - collector with optional LibreHardwareMonitor CPU temperature.
 # -DryRun never reads credentials, sends network requests, or writes collector logs.
 [CmdletBinding()]
 param(
@@ -72,6 +72,47 @@ function Add-NvidiaMetrics {
         $Metrics['gpu_vram_total_mib'] = $values[3]
     } catch {
         # Optional metrics must never prevent base telemetry collection.
+    }
+}
+
+# Parse only the Ryzen 7 5800X Tctl/Tdie sensor. Ignore CCD and other temperatures.
+# Return $null on missing, malformed, or implausible data; never invent 0 C.
+function Get-OnyxCpuTemperatureFromNode {
+    param($Node, [string]$Path = '')
+    if ($null -eq $Node) { return $null }
+    $current = "$Path/$($Node.Text)"
+    if ($current -eq '/Sensor/SQUALL/AMD Ryzen 7 5800X/Temperatures/Core (Tctl/Tdie)') {
+        $match = [regex]::Match([string]$Node.Value, '^\s*([0-9]+(?:[.,][0-9]+)?)\s*\u00B0C\s*$')
+        if (-not $match.Success) { return $null }
+        $raw = $match.Groups[1].Value.Replace(',', '.')
+        $value = 0.0
+        if (-not [double]::TryParse($raw, [System.Globalization.NumberStyles]::Float,
+            [System.Globalization.CultureInfo]::InvariantCulture, [ref]$value)) { return $null }
+        if ([double]::IsNaN($value) -or [double]::IsInfinity($value) -or
+            $value -lt 0 -or $value -gt 125) { return $null }
+        return $value
+    }
+    foreach ($child in @($Node.Children)) {
+        if ($null -ne $child) {
+            $result = Get-OnyxCpuTemperatureFromNode -Node $child -Path $current
+            if ($null -ne $result) { return $result }
+        }
+    }
+    return $null
+}
+
+function Add-CpuTemperatureMetrics {
+    param([hashtable]$Metrics)
+    try {
+        # This API is bound to the Windows USB/RNDIS interface, not the trusted LAN.
+        # Keep the request short: an absent LibreHardwareMonitor must not stall collection.
+        $tree = Invoke-RestMethod -Uri 'http://192.168.137.1:8085/data.json' -TimeoutSec 2 -ErrorAction Stop
+        $temperature = Get-OnyxCpuTemperatureFromNode -Node $tree
+        if ($null -ne $temperature) {
+            $Metrics['cpu_temp_c'] = [math]::Round([double]$temperature, 2)
+        }
+    } catch {
+        # Optional sensor unavailable; omit cpu_temp_c and continue other metrics.
     }
 }
 
@@ -152,6 +193,7 @@ try {
             }
             Add-NvidiaMetrics -Metrics $metrics
             Add-NetworkMetrics -Metrics $metrics
+            if (-not $DryRun) { Add-CpuTemperatureMetrics -Metrics $metrics }
             $payload = @{
                 schema_version = 1
                 source = 'SQUALL'

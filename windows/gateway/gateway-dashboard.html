@@ -106,10 +106,9 @@ body[data-view="streaming"] #usage-panel,
 body[data-view="streaming"] #health-detail,
 body[data-view="streaming"] #health-event,
 body[data-view="streaming"] #message,
-body[data-view="streaming"] #sample-time-card,
-body[data-view="streaming"] #cpu-temp-card{display:none}
+body[data-view="streaming"] #sample-time-card{display:none}
 body[data-view="streaming"] .layout{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:10px}
-body[data-view="streaming"] .extra-metrics{grid-template-columns:repeat(5,minmax(0,1fr));margin-top:10px}
+body[data-view="streaming"] .extra-metrics{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:10px}
 body[data-view="streaming"] .controls{gap:7px}
 body[data-view="streaming"] .panel{padding:12px}
 body[data-view="streaming"] .value{font-size:clamp(1.05rem,2.35vw,1.7rem);line-height:1.12}
@@ -152,7 +151,7 @@ body[data-view="streaming"] #health-panel .label{font-size:.75rem}
 <div class="panel"><div class="label">VRAM used</div><div class="value" id="vram">—</div><div class="metric-sub" id="vram-detail">No readings yet</div></div>
 <div class="panel"><div class="label">Network receive</div><div class="value" id="net-rx">—</div><div class="metric-sub">Intel I211 · Ethernet</div></div>
 <div class="panel"><div class="label">Network transmit</div><div class="value" id="net-tx">—</div><div class="metric-sub">Intel I211 · Ethernet</div></div>
-<div class="panel" id="cpu-temp-card"><div class="label">CPU temperature</div><div class="value" id="cpu-temp">—</div><div class="metric-sub">Awaiting verified sensor source</div></div>
+<div class="panel" id="cpu-temp-card"><div class="label">CPU temperature</div><div class="value" id="cpu-temp">—</div><div class="metric-sub">LibreHardwareMonitor · Tctl/Tdie</div></div>
 </section>
 <section class="panel" id="health-panel" style="margin-top:14px" aria-label="Health alerts"><div class="label">TELEMETRY HEALTH</div><div id="health-state" class="status stale">Not connected</div><p id="health-detail" aria-live="polite">Connect to check telemetry freshness.</p><p id="health-event" aria-live="polite"></p></section>
 <section class="panel" id="usage-panel" style="margin-top:14px">

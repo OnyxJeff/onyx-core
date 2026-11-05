@@ -10,7 +10,7 @@ ONYX CORE collects hardware telemetry from a Windows gaming and streaming PC ove
 
 **Latest published release: [v0.5.0 — Desktop Companion & Streaming](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)**
 
-**In development: v0.5.1 — Portrait OBS Overlay**
+**Production deployment verified: v0.5.1 — Portrait OBS Overlay**
 
 Version 0.5.1 adds a dedicated portrait OBS overlay while preserving the existing landscape overlay and telemetry architecture.
 
@@ -121,11 +121,11 @@ In v0.5.0 testing, **52 receiver**, **16 gateway**, and **7 CPU-temperature inte
 **Not yet verified:** Windows startup/reboot recovery, automatic LibreHardwareMonitor startup, and recovery following a temporary USB-network interruption.
 
 
-### v0.5.1 development validation
+### v0.5.1 validation
 
 The portrait OBS overlay has passed **25 gateway regression checks**, alongside **52 receiver regression tests** (77 checks total). The existing landscape route, new portrait route, query restrictions, and security checks passed.
 
-The portrait overlay has also been verified against live telemetry using a separate development gateway on port `18767`. Production deployment and release publication remain pending.
+The portrait overlay has also been verified against live telemetry using a separate development gateway on port `18767`. Production deployment verified on the Windows localhost gateway. GitHub release publication is pending.
 
 ## Development and security principles
 
@@ -145,7 +145,7 @@ The portrait overlay has also been verified against live telemetry using a separ
 | [v0.3.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.3.0) | Telemetry History & Dashboard |
 | [v0.4.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.4.0) | Health Monitoring & Local Alerts |
 | **[v0.5.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)** | **Desktop Companion & Streaming — latest release** |
-| v0.5.1 | Portrait OBS Overlay — in development |
+| v0.5.1 | Portrait OBS Overlay — production verified; release publication pending |
 | v1.0.0 | Planned stable installation and maintenance baseline |
 
 See [all releases](https://github.com/OnyxJeff/onyx-core/releases) for detailed release notes.

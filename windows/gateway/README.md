@@ -10,7 +10,7 @@ Version 0.5.1 introduces a dedicated portrait OBS overlay while preserving the o
 
 **Latest published release:** v0.5.0 — Desktop Companion & Streaming
 
-**Current development:** v0.5.1 — Portrait OBS Overlay
+**Production deployment:** v0.5.1 — Portrait OBS Overlay
 
 ## Available Endpoints
 
@@ -321,6 +321,6 @@ Do not modify the collector's DPAPI token or restart the Raspberry Pi receiver f
 
 **Latest published:** ONYX CORE v0.5.0 — Desktop Companion & Streaming
 
-**In development:** ONYX CORE v0.5.1 — Portrait OBS Overlay
+**Production deployment:** ONYX CORE v0.5.1 — Portrait OBS Overlay
 
-Development validation is complete. Production deployment and v0.5.1 release publication remain pending.
+Development validation and production deployment are complete. GitHub v0.5.1 release publication remains pending.

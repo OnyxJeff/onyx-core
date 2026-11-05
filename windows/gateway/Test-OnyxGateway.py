@@ -48,12 +48,23 @@ try:
     else: raise RuntimeError('gateway failed to start')
     overlay_code, overlay_html=get(f'http://127.0.0.1:{port}/overlay')
     overlay_slash_code, _=get(f'http://127.0.0.1:{port}/overlay/')
+    portrait_code, portrait_html=get(f'http://127.0.0.1:{port}/overlay-portrait')
+    portrait_slash_code, _=get(f'http://127.0.0.1:{port}/overlay-portrait/')
     cases=[('dashboard', code==200 and b'gatewayMode' in html),
            ('overlay served', overlay_code==200 and b'id="hud"' in overlay_html),
            ('overlay slash', overlay_slash_code==200),
            ('transparent overlay', b'background:transparent' in overlay_html),
            ('overlay has no token input', b'id="token"' not in overlay_html),
            ('overlay query denied', get(f'http://127.0.0.1:{port}/overlay?token=test')[0]==404),
+           ('portrait overlay served', portrait_code==200 and b'id="hud"' in portrait_html),
+           ('portrait overlay slash', portrait_slash_code==200),
+           ('portrait transparent', b'background: transparent' in portrait_html),
+           ('portrait CPU temperature', b'id="cpu-temp"' in portrait_html and b'fmtTemp(m.cpu_temp_c)' in portrait_html),
+           ('portrait no token input', b'id="token"' not in portrait_html),
+           ('portrait query denied', get(f'http://127.0.0.1:{port}/overlay-portrait?token=test')[0]==404),
+           ('portrait original preserved', overlay_code==200 and b'id="cpu-temp"' not in overlay_html),
+           ('portrait host-rebinding', get(f'http://127.0.0.1:{port}/overlay-portrait',{'Host':'attacker.test'})[0]==403),
+           ('portrait cross-site denied', get(f'http://127.0.0.1:{port}/overlay-portrait',{'Sec-Fetch-Site':'cross-site'})[0]==403),
            ('host-rebinding', get(f'http://127.0.0.1:{port}/api/v1/latest',{'Host':'attacker.test'})[0]==403),
            ('cross-site-fetch',get(f'http://127.0.0.1:{port}/api/v1/latest',{'Sec-Fetch-Site':'cross-site'})[0]==403),
            ('origin',get(f'http://127.0.0.1:{port}/api/v1/latest',{'Origin':'https://evil.example'})[0]==403),

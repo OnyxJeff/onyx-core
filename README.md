@@ -8,7 +8,11 @@
 
 ONYX CORE collects hardware telemetry from a Windows gaming and streaming PC over a private USB Ethernet gadget connection, stores readings on a Raspberry Pi Zero, and presents them through desktop and streaming dashboards. The reference deployment monitors **SQUALL**, a Windows 11 PC with an AMD Ryzen 7 5800X and NVIDIA GeForce RTX 3070 Ti, using **svr-onyxcore**, an original Raspberry Pi Zero Rev 1.3.
 
-**Current release: [v0.5.0 — Desktop Companion & Streaming](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)**
+**Latest published release: [v0.5.0 — Desktop Companion & Streaming](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)**
+
+**In development: v0.5.1 — Portrait OBS Overlay**
+
+Version 0.5.1 adds a dedicated portrait OBS overlay while preserving the existing landscape overlay and telemetry architecture.
 
 ## Features
 
@@ -29,10 +33,11 @@ The Windows collector sends authenticated samples roughly every 30 seconds. Opti
 - **Portrait, Landscape and Ultrawide** desktop layouts.
 - **Streaming** layout optimized for 1280×720, including CPU temperature, GPU and network metrics.
 - Local Windows dashboard: `http://127.0.0.1:18766/dashboard`.
-- OBS-compatible browser overlay: `http://127.0.0.1:18766/overlay`.
+- Landscape OBS overlay: `http://127.0.0.1:18766/overlay` (1280×720).
+- Portrait OBS overlay (v0.5.1): `http://127.0.0.1:18766/overlay-portrait` (450×800).
 - Standalone Raspberry Pi dashboard: `http://<PI_USB_IP>:8765/dashboard`.
 
-The Streaming dashboard and the separate OBS overlay are distinct interfaces. CPU temperature is included in the Streaming dashboard but not yet in the OBS overlay.
+The Streaming dashboard and OBS overlays are separate interfaces. The v0.5.1 portrait overlay includes CPU temperature; the original landscape OBS overlay remains unchanged.
 
 ### Raspberry Pi receiver
 
@@ -63,7 +68,8 @@ Windows 11 — SQUALL
   │
   └─ Python localhost gateway (127.0.0.1:18766)
        ├─ Desktop / Streaming dashboard
-       ├─ OBS browser overlay
+       ├─ Landscape OBS browser overlay
+       ├─ Portrait OBS browser overlay (v0.5.1)
        └─ Authenticated upstream reads from Pi receiver
 ```
 
@@ -114,6 +120,13 @@ In v0.5.0 testing, **52 receiver**, **16 gateway**, and **7 CPU-temperature inte
 
 **Not yet verified:** Windows startup/reboot recovery, automatic LibreHardwareMonitor startup, and recovery following a temporary USB-network interruption.
 
+
+### v0.5.1 development validation
+
+The portrait OBS overlay has passed **25 gateway regression checks**, alongside **52 receiver regression tests** (77 checks total). The existing landscape route, new portrait route, query restrictions, and security checks passed.
+
+The portrait overlay has also been verified against live telemetry using a separate development gateway on port `18767`. Production deployment and release publication remain pending.
+
 ## Development and security principles
 
 - GitHub is the source of truth; keep release history in version tags.
@@ -132,6 +145,7 @@ In v0.5.0 testing, **52 receiver**, **16 gateway**, and **7 CPU-temperature inte
 | [v0.3.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.3.0) | Telemetry History & Dashboard |
 | [v0.4.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.4.0) | Health Monitoring & Local Alerts |
 | **[v0.5.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)** | **Desktop Companion & Streaming — latest release** |
+| v0.5.1 | Portrait OBS Overlay — in development |
 | v1.0.0 | Planned stable installation and maintenance baseline |
 
 See [all releases](https://github.com/OnyxJeff/onyx-core/releases) for detailed release notes.
@@ -140,7 +154,7 @@ See [all releases](https://github.com/OnyxJeff/onyx-core/releases) for detailed 
 
 - LibreHardwareMonitor must be running with its HTTP JSON endpoint enabled for CPU temperature collection.
 - CPU sensor endpoint/path configuration is currently reference-host-specific.
-- CPU temperature is not yet displayed in the separate OBS overlay.
+- CPU temperature is supported by the new portrait OBS overlay in v0.5.1; the original landscape overlay remains unchanged.
 - Windows automatic startup and reboot recovery remain to be validated.
 - Temporary USB-network failure/reconnection recovery remains to be validated.
 - Future work includes more portable sensor discovery, overlay customization, operational documentation, and a stable v1.0.0 installation/maintenance baseline.

@@ -1,121 +1,326 @@
-# ONYX CORE v0.5.0 — Windows localhost gateway and OBS overlay
+# ONYX CORE v0.5.1 — Windows Gateway and OBS Overlays
 
-## Purpose
+## Overview
 
-The Windows gateway exposes a **read-only** view of ONYX CORE telemetry on `127.0.0.1:18766`. It authenticates to the Raspberry Pi receiver using the existing Windows-user-protected DPAPI credential. The web dashboard and OBS overlay never receive the bearer token.
+The ONYX CORE Windows localhost gateway provides read-only access to telemetry stored on the Raspberry Pi Zero receiver.
 
-Endpoints:
+The gateway handles upstream authentication using the existing Windows-user-protected DPAPI credential. Browser dashboards and OBS overlays do not receive the receiver's bearer token.
 
-| URL | Purpose |
+Version 0.5.1 introduces a dedicated portrait OBS overlay while preserving the original landscape overlay.
+
+**Latest published release:** v0.5.0 — Desktop Companion & Streaming
+
+**Current development:** v0.5.1 — Portrait OBS Overlay
+
+## Available Endpoints
+
+The production gateway listens on `127.0.0.1:18766`.
+
+| Endpoint | Purpose |
 | --- | --- |
-| `http://127.0.0.1:18766/dashboard` | Full dashboard, automatic authentication |
-| `http://127.0.0.1:18766/overlay` | Transparent compact OBS telemetry HUD; `/overlay/` also supported |
-| `/api/v1/latest` | Allowed read-only telemetry API |
-| `/api/v1/history?limit=60` | Allowed read-only history API (validated query) |
-| `/api/v1/health` | Allowed read-only receiver health API |
+| `/dashboard` | Full desktop and Streaming dashboard |
+| `/overlay` | Original landscape OBS overlay |
+| `/overlay-portrait` | New portrait OBS overlay |
+| `/api/v1/latest` | Latest telemetry sample |
+| `/api/v1/history?limit=60` | Bounded historical telemetry |
+| `/api/v1/health` | Telemetry freshness and receiver health |
 
-The gateway and OBS Browser Source run on the same Windows computer. The Pi receiver remains at `svr-onyxcore.local:8765` over the USB network link. The collector, receiver, SQLite database, and the Pi's own dashboard do not depend on this gateway.
+Both overlay routes support an optional trailing slash.
 
-## Prerequisites
+The portrait route does not accept arbitrary query parameters.
 
-- Windows 11, Python 3.13 installed at `C:\Python313\` (adjust paths to your installation), and PowerShell 5.1.
-- Existing saved DPAPI token at `%LOCALAPPDATA%\OnyxCore\collector-token.dpapi`.
-- Run the gateway scheduled task **as the same Windows account that created the DPAPI token**. An unrelated service identity cannot normally decrypt this user-scoped credential.
-- Working name resolution for `svr-onyxcore.local`, or a verified reachable receiver address.
-- A local copy of `OnyxGateway.py`, `Get-OnyxGatewayToken.ps1`, `gateway-dashboard.html`, and `overlay.html` in the same directory.
-
-Do **not** put token values in task arguments, URLs, Git, command histories, or logs.
-
-## Development worktree (verified configuration)
-
-Example source directory:
+## Architecture
 
 ```text
-D:\github_repos\onyx-core-v050\windows\gateway
+Windows 11 — SQUALL
+|
+|-- PowerShell Telemetry Collector
+|     |
+|     +-- Authenticated telemetry submission
+|             |
+|             v
+|     Raspberry Pi Zero Receiver
+|       - SQLite telemetry history
+|       - Latest telemetry API
+|       - Telemetry health API
+|
++-- Windows Local Gateway
+      - Loopback HTTP: 127.0.0.1:18766
+      - DPAPI-protected upstream credential
+      |
+      +-- /dashboard
+      +-- /overlay
+      +-- /overlay-portrait
+      |
+      +-- Authenticated read-only receiver API
 ```
 
-The gateway currently runs from this development worktree. **Do not remove or rename that directory until the scheduled task is migrated and tested during the production release.**
+The gateway does not replace the telemetry collector, Raspberry Pi receiver, or SQLite storage.
 
-Run unit tests without stopping the production task:
+## Development and Production Worktrees
+
+ONYX CORE uses two Windows Git worktrees.
+
+| Directory | Purpose |
+| --- | --- |
+| `D:\github_repos\onyx-core` | Production repository, branch `main` |
+| `D:\github_repos\onyx-core-v050` | Isolated feature development |
+
+The production gateway uses files in the production repository.
+
+Version 0.5.1 was tested using a separate development gateway on port `18767`, while production v0.5.0 continued operating on port `18766`.
+
+Do not modify running production source files before completing isolated testing and preparing rollback backups.
+
+## Requirements
+
+- Windows 11
+- Python 3
+- PowerShell 5.1
+- Existing ONYX CORE telemetry collector
+- Reachable Raspberry Pi receiver
+- Saved DPAPI-protected telemetry credential
+- Windows Task Scheduler for production startup
+
+The deployed reference environment uses Python 3.13.
+
+The gateway expects the following files in its directory:
+
+- `OnyxGateway.py`
+- `Get-OnyxGatewayToken.ps1`
+- `gateway-dashboard.html`
+- `overlay.html`
+- `overlay-portrait.html`
+
+The portrait HTML file is required by the v0.5.1 gateway.
+
+Do not put bearer tokens in command-line arguments, Git, URLs, or logs.
+
+## Production Gateway
+
+The production scheduled task is:
+
+`ONYX CORE - Local Gateway`
+
+Its source files reside in:
+
+`D:\github_repos\onyx-core\windows\gateway`
+
+The task runs Python under the Windows account that owns the protected DPAPI credential.
+
+The current implementation loads dashboard and overlay HTML into memory when the gateway starts.
+
+Changing HTML files therefore requires restarting the relevant gateway instance before the changes become visible.
+
+### Inspect Production Status
+
+```powershell
+Get-ScheduledTask -TaskName "ONYX CORE - Local Gateway" |
+    Select-Object TaskName, State
+
+Invoke-WebRequest `
+    -Uri "http://127.0.0.1:18766/dashboard" `
+    -UseBasicParsing
+```
+
+Production gateway restarts must be controlled and performed independently of the telemetry collector.
+
+## Development Gateway
+
+The development gateway can run alongside production using port `18767`.
+
+From the development worktree:
 
 ```powershell
 cd D:\github_repos\onyx-core-v050
+
+python -u .\windows\gateway\OnyxGateway.py `
+    --dashboard ".\windows\gateway\gateway-dashboard.html" `
+    --receiver svr-onyxcore.local `
+    --port 18767 `
+    --load-dpapi
+```
+
+The command must run under the same Windows user context that owns the DPAPI credential.
+
+The development instance is started manually and is not the production scheduled task.
+
+## OBS Browser Source Configuration
+
+ONYX CORE supports two separate transparent OBS overlays.
+
+| Setting | Landscape | Portrait |
+| --- | --- | --- |
+| Route | `/overlay` | `/overlay-portrait` |
+| Width | 1280 | 450 |
+| Height | 720 | 800 |
+| Background | Transparent | Transparent |
+| Refresh interval | 15 seconds | 15 seconds |
+| CPU temperature | Not displayed | Displayed |
+
+### Landscape Overlay
+
+The original landscape overlay remains unchanged in v0.5.1.
+
+Production URL:
+
+`http://127.0.0.1:18766/overlay`
+
+Recommended OBS browser-source dimensions: **1280 × 720**.
+
+### Portrait Overlay
+
+The new portrait overlay uses a vertically stacked telemetry layout.
+
+Production URL after v0.5.1 deployment:
+
+`http://127.0.0.1:18766/overlay-portrait`
+
+Recommended OBS browser-source dimensions: **450 × 800**.
+
+It displays:
+
+- CPU utilization
+- CPU temperature
+- System memory utilization
+- GPU utilization
+- GPU temperature
+- GPU VRAM usage and capacity
+- Ethernet receive throughput
+- Ethernet transmit throughput
+- Telemetry health and freshness
+
+CPU temperature is sourced from the existing LibreHardwareMonitor integration.
+
+The HUD occupies only part of the transparent browser canvas, allowing positioning within a larger OBS scene.
+
+### Add the Portrait Overlay to OBS
+
+1. Create a new Browser Source in OBS.
+2. Name it `ONYX CORE - Portrait`.
+3. Enter the portrait overlay URL.
+4. Set Width to `450`.
+5. Set Height to `800`.
+6. Leave Custom CSS empty initially.
+7. Use OBS Transform controls to position and scale the overlay.
+
+For development testing, use:
+
+`http://127.0.0.1:18767/overlay-portrait`
+
+Do not replace the existing production OBS source until the new gateway is deployed and verified.
+
+## Telemetry Refresh and Health
+
+Both OBS overlays refresh their displayed telemetry approximately every 15 seconds.
+
+The Windows collector submits new measurements approximately every 30 seconds.
+
+The overlay health indicator can report:
+
+- LIVE
+- STALE
+- OFFLINE
+- NO SIGNAL
+- UNREACHABLE
+
+A successful HTTP 200 response proves that the HTML is served, but does not by itself confirm that telemetry is fresh.
+
+Always inspect the displayed values and health indicator.
+
+## Security Boundaries
+
+The Windows gateway is intentionally restricted.
+
+- HTTP binds to `127.0.0.1`, not `0.0.0.0`.
+- Upstream API access is read-only.
+- Only approved API paths are proxied.
+- Arbitrary proxy destinations are not supported.
+- Authentication credentials remain outside browser content.
+- Host-header validation remains enabled.
+- Origin and Fetch Metadata restrictions remain enabled.
+- Unapproved overlay query parameters are rejected.
+- HTTP write methods remain blocked.
+
+The service must not be port-forwarded or exposed directly to LAN/WAN.
+
+Localhost binding does not prevent other software running on the same PC from accessing non-sensitive telemetry.
+
+The receiver connection over private USB networking uses plain HTTP. It is not suitable for carrying sensitive information across an untrusted network.
+
+## Testing and Validation
+
+Run the gateway regression tests from the development worktree:
+
+```powershell
+cd D:\github_repos\onyx-core-v050
+
 python .\windows\gateway\Test-OnyxGateway.py
 ```
 
-The Phase 5 suite has 16 checks: dashboard and overlay routes, transparent markup, token-free overlay, request restrictions, and authenticated API proxy reads through a simulated upstream receiver.
-
-## Manual launch and Windows Task Scheduler
-
-`OnyxGateway.py --load-dpapi` calls the adjacent `Get-OnyxGatewayToken.ps1` helper to decrypt the existing token under the current Windows user. The Python process captures the helper's output privately; the token is not written to browser content or command-line arguments. Legacy stdin-based launch remains available for compatibility, but is **not** the configured production startup method.
-
-For interactive troubleshooting, **stop the scheduled task first** to avoid a port conflict, then run:
+For the Raspberry Pi receiver tests:
 
 ```powershell
-$gatewayDir = 'D:\github_repos\onyx-core-v050\windows\gateway'
-python "$gatewayDir\OnyxGateway.py" `
-  --dashboard "$gatewayDir\gateway-dashboard.html" `
-  --receiver svr-onyxcore.local `
-  --port 18766 `
-  --load-dpapi
+python -m unittest discover `
+    -s tests/services `
+    -p "test_*.py"
 ```
 
-The current scheduled task is named **`ONYX CORE - Local Gateway`**, is triggered at Windows user logon, and runs `C:\Python313\pythonw.exe` directly (no persistent PowerShell parent). Its action is equivalent to:
+### v0.5.1 Development Results
 
-```text
-Program: C:\Python313\pythonw.exe
-Arguments: -u "D:\github_repos\onyx-core-v050\windows\gateway\OnyxGateway.py" --dashboard "D:\github_repos\onyx-core-v050\windows\gateway\gateway-dashboard.html" --receiver svr-onyxcore.local --port 18766 --load-dpapi
-Start in: D:\github_repos\onyx-core-v050\windows\gateway
-```
+| Validation | Result |
+| --- | --- |
+| Receiver automated tests | 52 passed |
+| Gateway automated tests | 25 passed |
+| Existing landscape overlay | Verified |
+| Portrait overlay endpoint | Verified |
+| Portrait trailing-slash route | Verified |
+| CPU temperature integration | Verified |
+| Transparent canvas | Verified |
+| Query parameter rejection | Passed |
+| Host-rebinding protection | Passed |
+| Cross-site protection | Passed |
+| Development gateway HTTP validation | Passed |
+| Live portrait telemetry | Verified |
 
-This direct process ownership allows `Stop-ScheduledTask` to terminate the gateway without leaving an orphaned Python process. `pythonw.exe` has no console; debug with interactive `python.exe` when needed.
+**77 regression checks passed** across the receiver and gateway test suites.
 
-Inspect operational state:
+The portrait overlay was also inspected visually with real telemetry using the development gateway on port `18767`.
 
-```powershell
-Get-ScheduledTask -TaskName 'ONYX CORE - Local Gateway' | Select-Object TaskName,State
-(Invoke-WebRequest http://127.0.0.1:18766/dashboard -UseBasicParsing -TimeoutSec 5).StatusCode
-(Invoke-WebRequest http://127.0.0.1:18766/overlay -UseBasicParsing -TimeoutSec 5).StatusCode
-```
+These results do not imply that production v0.5.1 deployment has been completed.
 
-Expected: task `Running` and HTTP `200` from both routes. Confirm the metrics and health status populate in a browser/OBS, not merely that HTML is served. Task stop/start and HTTP checks have been validated; a fresh Windows logoff/logon trigger check is still pending.
+## Safe Deployment and Rollback
 
-## OBS Browser Source
+Before deploying gateway changes:
 
-Create a Browser Source in an OBS test scene:
+1. Confirm all regression tests pass.
+2. Back up production gateway source and overlay files.
+3. Preserve the currently deployed Git revision.
+4. Stop only the gateway scheduled task.
+5. Confirm its Python process has exited.
+6. Deploy the tested gateway and overlay files.
+7. Restart the gateway scheduled task.
+8. Verify both overlay routes and the dashboard.
+9. Verify live telemetry and health status.
 
-- URL: `http://127.0.0.1:18766/overlay`
-- Width: `1280`; Height: `720`; FPS: `30`.
-- Optional Custom CSS: `body { margin: 0; background: rgba(0,0,0,0) !important; }`
-- Adjust placement using OBS Transform; the HUD occupies only a small portion of the transparent canvas.
+If the update fails, restore the saved gateway files or revert to the previous tested Git revision, restart the gateway, and verify the previous endpoints.
 
-The HUD polls the gateway every 15 seconds; Windows collector samples arrive approximately every 30 seconds. Use LIVE/STALE/UNREACHABLE and sample age to distinguish current data from cached readings. The overlay needs no API token prompt or layout selector.
+Do not modify the collector's DPAPI token or restart the Raspberry Pi receiver for a gateway-only overlay update.
 
-## Security boundaries
+`Start-OnyxGateway.ps1` remains available as a legacy/manual compatibility launcher. The production scheduled task runs Python directly.
 
-- The HTTP service must remain bound to `127.0.0.1`, **never** `0.0.0.0`; do not port-forward or publish it on the LAN.
-- Allowed proxy reads are restricted to `/api/v1/history`, `/api/v1/latest`, and `/api/v1/health`; no telemetry POST, arbitrary proxy URL, or write method is enabled.
-- Host-header, Origin, and Fetch Metadata checks help restrict browser-originated access. The gateway is **not a security boundary against other local software**: a process on the PC that can access loopback may read the non-sensitive telemetry.
-- The full Pi dashboard may store only the `onyxcore-layout` UI preference in browser `localStorage`, **not** the API bearer token. The localhost gateway and overlay do not expose that token to the browser.
-- The receiver connection across the isolated USB network is plain HTTP; localhost also uses HTTP. Do not treat either link as appropriate for sensitive data on an untrusted network.
+## Known Limitations
 
-## Safe restart and rollback
+- CPU temperature currently depends on LibreHardwareMonitor and the configured Ryzen sensor path.
+- The original landscape OBS overlay does not include CPU temperature.
+- Reboot and automatic startup recovery validation remains outstanding.
+- Temporary USB-network interruption recovery validation remains outstanding.
+- The portrait overlay was developed against the reference Windows and Raspberry Pi deployment.
 
-When changing a deployed gateway file, back up `OnyxGateway.py` first; stop only the gateway task; validate that its Python process has exited; update files; run gateway tests; and restart it. Do not restart the Pi receiver or collector for a gateway-only update.
+## Release Status
 
-```powershell
-$taskName = 'ONYX CORE - Local Gateway'
-Stop-ScheduledTask -TaskName $taskName
-Start-Sleep -Seconds 3
-Get-CimInstance Win32_Process | Where-Object {
-  $_.Name -match '^python(w)?\.exe$' -and $_.CommandLine -match 'OnyxGateway\.py'
-} | Select-Object ProcessId,Name
-```
+**Latest published:** ONYX CORE v0.5.0 — Desktop Companion & Streaming
 
-The last command should return **no matching process** before files are replaced. If an update fails, restore the saved `OnyxGateway.py`, restart the scheduled task and verify `/dashboard` (and `/overlay` if the restored version supports it). Keep the existing DPAPI token file untouched.
+**In development:** ONYX CORE v0.5.1 — Portrait OBS Overlay
 
-`Start-OnyxGateway.ps1` is retained as a **legacy/manual compatibility launcher**, not the current scheduled-task action. Phase-specific rollback notes and `.pre-phase*.py` copies are development artifacts and should not be added to the release.
-
-## Release status
-
-This document describes the validated Phase 4C/5 Windows configuration used during **v0.5.0 release preparation**. Production-worktree migration, merge, release tag, and post-logon validation are separate remaining steps; do not consider them complete merely because the current gateway is running.
+Development validation is complete. Production deployment and v0.5.1 release publication remain pending.

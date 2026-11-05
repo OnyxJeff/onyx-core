@@ -1,4 +1,4 @@
-"""ONYX CORE v0.5.0 read-only local gateway. Python 3 standard library."""
+"""ONYX CORE v0.5.1 read-only local gateway. Python 3 standard library."""
 import argparse
 import http.server
 import ipaddress
@@ -16,7 +16,7 @@ ALLOWED_API = {'/api/v1/health', '/api/v1/latest', '/api/v1/history'}
 LIMIT_MAX = 500
 
 class Gateway(http.server.BaseHTTPRequestHandler):
-    server_version = 'OnyxCoreGateway/0.5.0'
+    server_version = 'OnyxCoreGateway/0.5.1'
     sys_version = ''
     protocol_version = 'HTTP/1.1'
 
@@ -67,6 +67,8 @@ class Gateway(http.server.BaseHTTPRequestHandler):
             return self.send_bytes(200, self.server.dashboard, 'text/html; charset=utf-8', html=True)
         if parsed.path in ('/overlay', '/overlay/') and not parsed.query:
             return self.send_bytes(200, self.server.overlay, 'text/html; charset=utf-8', html=True)
+        if parsed.path in ('/overlay-portrait', '/overlay-portrait/') and not parsed.query:
+            return self.send_bytes(200, self.server.overlay_portrait, 'text/html; charset=utf-8', html=True)
         if parsed.path not in ALLOWED_API:
             return self.error(404, 'not_found')
         if parsed.path != '/api/v1/history' and parsed.query:
@@ -153,11 +155,19 @@ def main():
         p.error('OBS overlay file missing')
     if b'ONYX CORE' not in overlay or b'id="hud"' not in overlay:
         p.error('OBS overlay file invalid')
+    portrait_path = Path(__file__).with_name('overlay-portrait.html')
+    try:
+        portrait = portrait_path.read_bytes()
+    except OSError:
+        p.error('Portrait OBS overlay file missing')
+    if b'ONYX CORE' not in portrait or b'id="hud"' not in portrait or b'id="cpu-temp"' not in portrait:
+        p.error('Portrait OBS overlay file invalid')
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     server = http.server.ThreadingHTTPServer((LOCAL_HOST, args.port), Gateway)
     server.daemon_threads = True
     server.dashboard = dashboard
     server.overlay = overlay
+    server.overlay_portrait = portrait
     server.token = token
     server.upstream = f'http://{args.receiver}:8765'
     server.opener = opener

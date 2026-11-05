@@ -29,7 +29,8 @@ def classify(observation):
         return "Investigate"
     win = windows.get("classification")
     pia = pi.get("classification")
-    if win == "WindowsPathReady" and pia == "PiInternetVerified":
+    if (win == "WindowsPathReady" and pia == "PiInternetVerified"
+            and observation.get("windows_upstream_ok") is True):
         return "Healthy"
     if win in ("AdapterMissing", "AdapterDown", "GatewayAddressMissing"):
         return "WaitAndRetry"
@@ -43,6 +44,8 @@ def classify(observation):
     if (win == "WindowsPathReady"
             and pia == "ExternalTcpUnverified"
             and pi.get("gateway_reachable") is True
+            and pi.get("dns_resolves") is True
+            and pi.get("https_works") is False
             and observation.get("windows_upstream_ok") is True
             and corroborated):
         return "SuspectedIcs"
@@ -110,11 +113,14 @@ def self_test():
     now = datetime(2026, 11, 5, 8, tzinfo=timezone.utc)
 
     def obs(age, win="WindowsPathReady", pi="PiInternetVerified",
-            upstream=True, targets=None, gateway=True):
+            upstream=True, targets=None, gateway=True, dns=True, https=None):
         return {
             "timestamp_utc": (now - timedelta(seconds=age)).isoformat(),
             "windows": {"classification": win},
-            "pi": {"classification": pi, "gateway_reachable": gateway},
+            "pi": {"classification": pi, "gateway_reachable": gateway,
+                   "dns_resolves": dns,
+                   "https_works": (pi == "PiInternetVerified"
+                                   if https is None else https)},
             "windows_upstream_ok": upstream,
             "external_tcp_failed_targets": targets or [],
         }
@@ -128,6 +134,20 @@ def self_test():
     )
     tests = [
         ("healthy", report(obs(10)), "Healthy"),
+        ("TCP failures but HTTPS succeeds",
+         report(obs(10, pi="ExternalTcpUnverified", https=True,
+                    targets=["1.1.1.1:443", "9.9.9.9:443"])), "Investigate"),
+        ("TCP failures but DNS unavailable",
+         report(obs(10, pi="ExternalTcpUnverified", dns=False,
+                    targets=["1.1.1.1:443", "9.9.9.9:443"])), "Investigate"),
+        ("Pi healthy, Windows upstream down",
+         report(obs(10, upstream=False)), "Investigate"),
+        ("Pi healthy, Windows upstream unknown",
+         report({
+             "timestamp_utc": obs(10)["timestamp_utc"],
+             "windows": {"classification": "WindowsPathReady"},
+             "pi": {"classification": "PiInternetVerified"}
+         }), "Investigate"),
         ("adapter missing", report(obs(10, win="AdapterMissing")), "WaitAndRetry"),
         ("adapter down", report(obs(10, win="AdapterDown")), "WaitAndRetry"),
         ("gateway missing", report(obs(10, win="GatewayAddressMissing")), "WaitAndRetry"),

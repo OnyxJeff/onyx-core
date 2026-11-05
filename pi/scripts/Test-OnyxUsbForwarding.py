@@ -39,12 +39,23 @@ def command_ok(args, timeout=5):
         return None
 
 
-def tcp_works():
-    try:
-        with socket.create_connection(("1.1.1.1", 443), timeout=4):
-            return True
-    except OSError:
-        return False
+def summarize_tcp_results(results):
+    expected = ("1.1.1.1:443", "9.9.9.9:443")
+    complete = all(target in results for target in expected)
+    failed = [target for target in expected if results.get(target) is False]
+    return complete and not failed, failed
+
+
+def probe_tcp_targets():
+    results = {}
+    for host in ("1.1.1.1", "9.9.9.9"):
+        target = host + ":443"
+        try:
+            with socket.create_connection((host, 443), timeout=4):
+                results[target] = True
+        except OSError:
+            results[target] = False
+    return results
 
 
 def https_works():
@@ -87,6 +98,23 @@ def self_test():
         print("PASS: " + expected)
     print("PASS: All 7 Pi classifications")
 
+    scenarios = [
+        ({}, False, []),
+        ({"1.1.1.1:443": True, "9.9.9.9:443": True}, True, []),
+        ({"1.1.1.1:443": False, "9.9.9.9:443": True},
+         False, ["1.1.1.1:443"]),
+        ({"1.1.1.1:443": False, "9.9.9.9:443": False},
+         False, ["1.1.1.1:443", "9.9.9.9:443"]),
+    ]
+
+    for index, (results, expected_ok, expected_failed) in enumerate(scenarios, 1):
+        actual_ok, actual_failed = summarize_tcp_results(results)
+        if (actual_ok, actual_failed) != (expected_ok, expected_failed):
+            raise AssertionError("TCP scenario %d failed" % index)
+        print("PASS: TCP scenario %d" % index)
+
+    print("PASS: All 4 TCP outcome tests")
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -123,6 +151,8 @@ def main():
     )
 
     gateway_reachable = False
+    tcp_targets = {}
+    tcp_failures = []
     external_tcp = False
     dns_resolves = False
     https_available = False
@@ -137,7 +167,8 @@ def main():
         )
 
     if gateway_reachable:
-        external_tcp = tcp_works()
+        tcp_targets = probe_tcp_targets()
+        external_tcp, tcp_failures = summarize_tcp_results(tcp_targets)
         dns = command_ok(
             ["getent", "ahostsv4", "example.com"],
             timeout=7
@@ -163,6 +194,8 @@ def main():
         "route_via_usb": route_via_usb,
         "gateway_reachable": gateway_reachable,
         "external_tcp_443": external_tcp,
+        "external_tcp_targets": tcp_targets,
+        "external_tcp_failed_targets": tcp_failures,
         "dns_resolves": dns_resolves,
         "https_works": https_available,
         "repair_action": "None",

@@ -8,6 +8,8 @@
 
 ONYX CORE collects hardware telemetry from a Windows gaming and streaming PC over a private USB Ethernet gadget connection, stores readings on a Raspberry Pi Zero, and presents them through desktop and streaming dashboards. The reference deployment monitors **SQUALL**, a Windows 11 PC with an AMD Ryzen 7 5800X and NVIDIA GeForce RTX 3070 Ti, using **svr-onyxcore**, an original Raspberry Pi Zero Rev 1.3.
 
+**Latest release: [v0.5.1 — Portrait OBS Overlay](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.1)**
+
 **Previous release: [v0.5.0 — Desktop Companion & Streaming](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)**
 
 **Production deployment verified: v0.5.1 — Portrait OBS Overlay**
@@ -144,8 +146,8 @@ The portrait overlay has also been verified against live telemetry using a separ
 | [v0.2.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.2.0) | USB Telemetry Foundation |
 | [v0.3.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.3.0) | Telemetry History & Dashboard |
 | [v0.4.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.4.0) | Health Monitoring & Local Alerts |
-| **[v0.5.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)** | **Desktop Companion & Streaming — latest release** |
-| v0.5.1 | Portrait OBS Overlay — production verified |
+| [v0.5.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0) | Desktop Companion & Streaming |
+| **[v0.5.1](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.1)** | **Portrait OBS Overlay — latest release, production verified** |
 | v1.0.0 | Planned stable installation and maintenance baseline |
 
 See [all releases](https://github.com/OnyxJeff/onyx-core/releases) for detailed release notes.
@@ -166,6 +168,7 @@ See the [`docs/` directory](docs/) for operational guidance. The [USB gadget / W
 ## Project links
 
 - [Source repository](https://github.com/OnyxJeff/onyx-core)
+- [v0.5.1 release notes](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.1)
 - [v0.5.0 release notes](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)
 - [OnyxNet infrastructure portfolio](https://onyxnet.live)
 - [OnyxJeff creator / streaming website](https://onyxjeff.live)

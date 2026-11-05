@@ -8,6 +8,7 @@ The gateway handles upstream authentication using the existing Windows-user-prot
 
 Version 0.5.1 introduces a dedicated portrait OBS overlay while preserving the original landscape overlay.
 
+**Latest release:** v0.5.1 — Portrait OBS Overlay
 **Previous release:** v0.5.0 — Desktop Companion & Streaming
 
 **Production deployment:** v0.5.1 — Portrait OBS Overlay
@@ -319,7 +320,7 @@ Do not modify the collector's DPAPI token or restart the Raspberry Pi receiver f
 
 ## Release Status
 
-**Latest published:** ONYX CORE v0.5.0 — Desktop Companion & Streaming
+**Latest published:** [ONYX CORE v0.5.1 — Portrait OBS Overlay](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.1)
 
 **Production deployment:** ONYX CORE v0.5.1 — Portrait OBS Overlay
 

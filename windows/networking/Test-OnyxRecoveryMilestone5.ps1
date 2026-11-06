@@ -19,8 +19,8 @@ Write-Host "`n=== Milestone 5: read-only repository guards ==="
 Assert-OnyxM5 ((Split-Path -Leaf $Dev) -eq 'onyx-core-v060') 'Wrong development worktree name'
 $Branch = & git -C $Dev branch --show-current
 Assert-OnyxM5 (($LASTEXITCODE -eq 0) -and ($Branch -eq 'feature/v0.6.0-reliability')) 'Wrong development branch'
-$Head = & git -C $Dev rev-parse --short=7 HEAD
-Assert-OnyxM5 (($LASTEXITCODE -eq 0) -and ($Head -eq '049bd72')) 'Unexpected Milestone 4 checkpoint'
+& git -C $Dev merge-base --is-ancestor '049bd72' HEAD
+Assert-OnyxM5 ($LASTEXITCODE -eq 0) 'Milestone 4 must be an ancestor of development HEAD'
 Assert-OnyxM5 (Test-Path -LiteralPath $Collector -PathType Leaf) 'Collector missing'
 Assert-OnyxM5 (Test-Path -LiteralPath $EngineScenarios -PathType Leaf) 'Scenario file missing'
 if (Test-Path -LiteralPath $Prod -PathType Container) {

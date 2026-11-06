@@ -285,6 +285,8 @@ try {
         $PiState = @{
             classification = [string]$PiProbeDetails.classification
             gateway_reachable = ($PiProbeDetails.gateway_reachable -eq $true)
+            dns_resolves = ($PiProbeDetails.dns_resolves -eq $true)
+            https_works = ($PiProbeDetails.https_works -eq $true)
         }
         if ($null -ne $PiProbeDetails.external_tcp_failed_targets) {
             $PiFailedTargets = @($PiProbeDetails.external_tcp_failed_targets)

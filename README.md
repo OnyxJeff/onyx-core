@@ -8,13 +8,13 @@
 
 ONYX CORE collects hardware telemetry from a Windows gaming and streaming PC over a private USB Ethernet gadget connection, stores readings on a Raspberry Pi Zero, and presents them through desktop and streaming dashboards. The reference deployment monitors **SQUALL**, a Windows 11 PC with an AMD Ryzen 7 5800X and NVIDIA GeForce RTX 3070 Ti, using **svr-onyxcore**, an original Raspberry Pi Zero Rev 1.3.
 
-**Latest release: [v0.5.1 — Portrait OBS Overlay](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.1)**
+**Latest release: [v0.6.0 — USB/ICS Reliability Diagnostics](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.6.0)**
 
-**Previous release: [v0.5.0 — Desktop Companion & Streaming](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)**
+**Previous release: [v0.5.1 — Portrait OBS Overlay](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.1)**
 
 **Production deployment verified: v0.5.1 — Portrait OBS Overlay**
 
-Version 0.5.1 adds a dedicated portrait OBS overlay while preserving the existing landscape overlay and telemetry architecture.
+Version 0.6.0 adds read-only Windows USB/ICS and Raspberry Pi forwarding diagnostics, restricted SSH evidence collection, and a fail-closed recovery decision policy. **These tools are manual and have not been deployed as an unattended production monitor; automatic ICS repair is not implemented.**
 
 ## Features
 
@@ -48,6 +48,16 @@ The Streaming dashboard and OBS overlays are separate interfaces. The v0.5.1 por
 - Durable replay/acceptance watermark, including after history pruning.
 - Telemetry freshness monitoring and health alerts.
 - Standard-library Python implementation without runtime PyPI dependencies.
+
+### USB/ICS reliability diagnostics (v0.6.0)
+
+- Check Windows USB adapter readiness, ICS gateway addressing, routing, receiver reachability, and upstream TCP connectivity.
+- Check Pi USB interface readiness, forwarding routes, gateway reachability, external TCP targets, DNS, and HTTPS.
+- Collect Pi evidence using a dedicated, noninteractive SSH key restricted to a forced diagnostic command.
+- Retain at most 12 observations within five minutes and fail closed on corrupt or missing evidence.
+- Report `Healthy`, `WaitAndRetry`, `Investigate`, or `PossibleIcsFailure`; **every decision retains `repair_action: None`**.
+
+Diagnostics are **manually invoked**, separate from the telemetry collector and OBS gateway, and do not install scheduled tasks, restart ICS, reset network adapters, or change production network settings. See [v0.6.0 operations](docs/v0.6.0/OPERATIONS.md) and [recovery policy](docs/reliability/recovery-policy-v0.6.0.md).
 
 ## Architecture
 
@@ -129,6 +139,12 @@ The portrait OBS overlay has passed **25 gateway regression checks**, alongside 
 
 The portrait overlay has also been verified against live telemetry using a separate development gateway on port `18767`. Production deployment verified on the Windows localhost gateway.
 
+### v0.6.0 validation
+
+The read-only diagnostic release passed **52 receiver**, **25 gateway**, and **7 CPU-temperature integration** regression tests (84 existing application tests), plus **35 offline recovery scenarios**, decision-engine and Pi-forwarding self-tests, and SSH/history failure-injection tests. Live read-only diagnostics reported healthy connectivity, and the dashboard and both OBS overlays were visually checked with live telemetry.
+
+For the release-readiness runner, use `windows/networking/Test-OnyxRecoveryMilestone6.ps1` from the isolated `onyx-core-v060` development worktree. Its Milestone 5/6 test guards are specific to that worktree and the original v0.5.1 baseline; they are **not general-purpose CI tests**. See [release readiness](docs/v0.6.0/RELEASE_READINESS.md).
+
 ## Development and security principles
 
 - GitHub is the source of truth; keep release history in version tags.
@@ -147,7 +163,8 @@ The portrait overlay has also been verified against live telemetry using a separ
 | [v0.3.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.3.0) | Telemetry History & Dashboard |
 | [v0.4.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.4.0) | Health Monitoring & Local Alerts |
 | [v0.5.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0) | Desktop Companion & Streaming |
-| **[v0.5.1](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.1)** | **Portrait OBS Overlay — latest release, production verified** |
+| [v0.5.1](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.1) | Portrait OBS Overlay — production verified |
+| **[v0.6.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.6.0)** | **USB/ICS Reliability Diagnostics — latest release; manual diagnostics, not deployed** |
 | v1.0.0 | Planned stable installation and maintenance baseline |
 
 See [all releases](https://github.com/OnyxJeff/onyx-core/releases) for detailed release notes.
@@ -159,15 +176,19 @@ See [all releases](https://github.com/OnyxJeff/onyx-core/releases) for detailed 
 - CPU temperature is supported by the new portrait OBS overlay in v0.5.1; the original landscape overlay remains unchanged.
 - Windows automatic startup and reboot recovery remain to be validated.
 - Temporary USB-network failure/reconnection recovery remains to be validated.
-- Future work includes more portable sensor discovery, overlay customization, operational documentation, and a stable v1.0.0 installation/maintenance baseline.
+- v0.6.0 reliability checks are manual and currently use an isolated development worktree and restricted Pi SSH setup. No unattended monitoring or automatic ICS repair is provided.
+- Future work includes more portable sensor discovery, overlay customization, a production-ready diagnostic installation, and a stable v1.0.0 installation/maintenance baseline.
 
 ## Documentation and troubleshooting
 
 See the [`docs/` directory](docs/) for operational guidance. The [USB gadget / Windows ICS troubleshooting runbook](docs/troubleshooting/usb-gadget-networking.md) covers observed environment-specific failures, read-only diagnostics, safe recovery, and rollback; it is **not** a required setup step for every installation (see [issue #10](https://github.com/OnyxJeff/onyx-core/issues/10)).
 
+For v0.6.0, consult [release readiness](docs/v0.6.0/RELEASE_READINESS.md), [manual diagnostic operations](docs/v0.6.0/OPERATIONS.md), and [deployment/rollback planning](docs/v0.6.0/DEPLOYMENT_ROLLBACK.md).
+
 ## Project links
 
 - [Source repository](https://github.com/OnyxJeff/onyx-core)
+- [v0.6.0 release notes](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.6.0)
 - [v0.5.1 release notes](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.1)
 - [v0.5.0 release notes](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0)
 - [OnyxNet infrastructure portfolio](https://onyxnet.live)

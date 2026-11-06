@@ -11,7 +11,7 @@ Development is isolated from production v0.5.1.
 
 - Windows: Test-OnyxUsbIcsReadiness.ps1
 - Raspberry Pi: Test-OnyxUsbForwarding.py
-- Future: independent Windows upstream connectivity check
+- Windows upstream: independent TCP connectivity checks on the expected non-USB interface
 
 ## Decision Classes
 

@@ -1,6 +1,6 @@
 # ONYX CORE v0.6.0 — Reliability Release Readiness
 
-**Status:** Candidate review only. Not merged, deployed, or released.
+**Status:** Validated release candidate; PR #14 remains draft. Not merged, deployed, or released.
 
 **Baseline:** v0.5.1 production `main` at `6d1e599`.
 **Milestone 5 development checkpoint:** `725ed95`, branch `feature/v0.6.0-reliability`.
@@ -27,7 +27,7 @@ The original Raspberry Pi Zero uses USB RNDIS networking to receive authenticate
 | 1–3 | Read-only USB/ICS probes, decision policy, evidence collector | Committed before `049bd72` |
 | 4 | Restricted forced-command SSH, finite timeouts, bounded persistent history | `049bd72`; acceptance tests passed |
 | 5 | Adversarial SSH/history/decision testing and DNS/HTTPS evidence forwarding | `725ed95`; 35 policy scenarios and live read-only diagnostics passed |
-| 6 | Baseline regression suite, scope audit, operating and rollback documentation | In development; must be validated and committed |
+| 6 | Baseline regression suite, scope audit, operating and rollback documentation | `70b9152`; all selected validations passed |
 
 ## Milestone 6 gates (all must pass before recommending merge)
 
@@ -74,6 +74,8 @@ The default suite does not invoke the live collector, open HTTP connections, or 
 Every decision must retain `repair_action = None`. Three corroborated observations require separate time samples spaced at least 30 seconds apart, within the five-minute evidence window. They are a suspicion threshold, **not** proof that ICS is the cause.
 
 ## Known limits / blockers
+
+Development-only test limitation: Milestone 5 and 6 runners require the feature worktree and original production baseline. Run them from the development worktree; they are not branch-neutral CI tests.
 
 - This milestone is not an unattended monitor. No task or service is installed for repeated evidence collection.
 - A successful probe does not establish post-reboot resilience or automatic recovery from a physical USB disconnect. Those should be validated as controlled manual operational tests before claiming them.

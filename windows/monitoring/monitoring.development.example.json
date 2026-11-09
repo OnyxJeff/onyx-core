@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "profile": "development",
+  "read_only": true,
+  "repair_action": "None",
+  "windows": {
+    "adapter_name": "Ethernet 3",
+    "gateway_ip": "192.168.137.1",
+    "receiver_ip": "192.168.137.167",
+    "receiver_port": 8765,
+    "upstream_interface": "Ethernet"
+  },
+  "pi": {
+    "hostname": "svr-onyxcore.local",
+    "user": "onyxpi",
+    "monitor_key_path": "%USERPROFILE%\\.ssh\\onyxcore_monitor_ed25519"
+  },
+  "runtime": {
+    "python_executable": "C:\\Python313\\python.exe",
+    "ssh_executable": "C:\\Windows\\System32\\OpenSSH\\ssh.exe"
+  },
+  "timeouts": {
+    "ssh_seconds": 45,
+    "upstream_tcp_ms": 3000,
+    "receiver_tcp_ms": 2000
+  },
+  "monitoring_interval_seconds": 60,
+  "startup_grace_seconds": 180,
+  "state_dir": "%LOCALAPPDATA%\\OnyxCore-v070-Development\\Monitoring"
+}

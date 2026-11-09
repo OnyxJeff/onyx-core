@@ -3,7 +3,7 @@
 
 This is a PLAN checker, not a diagnostic launcher. It never calls PowerShell,
 SSH, a network API, a cycle runner, or a function that writes incident state.
-The release live runner is not integrated and always remains disabled here.
+A separate release live entry point may use this checker, but this CLI never executes.
 """
 from __future__ import annotations
 
@@ -37,12 +37,14 @@ def _non_redirected_file(path: Path) -> bool:
     return path.is_file()
 
 
-def _check_store(directory: Path, initialize_new: bool) -> tuple[str, int, int]:
+def _check_store(directory: Path, initialize_new: bool, *, owned_cycle_lock: bool = False) -> tuple[str, int, int]:
     """Inspect existing release artifacts without locking, creating or rewriting.
 
     IMPORTANT: This is not a concurrency guarantee. The eventual runner must
     independently revalidate the state *under its exclusive cycle lock*.
     """
+    if type(owned_cycle_lock) is not bool:
+        raise ReleaseCyclePreflightError('owned lock flag must be boolean')
     if not directory.is_absolute():
         raise ReleaseCyclePreflightError('release state directory must be absolute')
     if directory.is_symlink() or bool(getattr(directory, 'is_junction', lambda: False)()):
@@ -75,8 +77,13 @@ def _check_store(directory: Path, initialize_new: bool) -> tuple[str, int, int]:
         raise ReleaseCyclePreflightError('partial release initialization; manual recovery required')
 
     if not state_present:
-        # No file, lock or observation may pre-exist for an initial run.
-        if directory.is_dir() and tuple(directory.iterdir()):
+        # A lock created and HELD by the caller may be present during the
+        # second check. A leftover pre-existing lock is never accepted.
+        existing = {item.name for item in directory.iterdir()} if directory.is_dir() else set()
+        permitted = {'incident-cycle.lock'} if owned_cycle_lock else set()
+        if owned_cycle_lock and 'incident-cycle.lock' not in existing:
+            raise ReleaseCyclePreflightError('owned cycle lock is missing')
+        if existing != permitted:
             raise ReleaseCyclePreflightError('nonempty release directory without initialized store')
         if not initialize_new:
             raise ReleaseCyclePreflightError('no release incident store; separate first-run authorization required')
@@ -137,7 +144,7 @@ def plan_release_cycle(*, intended_live_read_only: bool, initialize_new: bool = 
         'store_modified': False,
         'schedule_requested': False,
         'repair_action': 'None',
-        'assessment': 'PLAN ONLY: release one-shot runner not yet integrated; no probe or state change authorized.',
+        'assessment': 'PLAN ONLY: this command does not grant runtime consent or execute a probe.',
     }
 
 

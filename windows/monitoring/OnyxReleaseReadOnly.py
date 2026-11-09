@@ -25,6 +25,10 @@ import OnyxReleasePolicy as policy
 CONFIG_REL = Path('windows/monitoring/monitoring.release.example.json')
 REQUIRED_TRACKED = (
     'windows/monitoring/OnyxReleaseReadOnly.py',
+    'windows/monitoring/OnyxReleaseLiveIncident.py',
+    'windows/monitoring/OnyxReleaseCyclePreflight.py',
+    'windows/monitoring/Invoke-OnyxReleaseCycle.ps1',
+    'windows/networking/Collect-OnyxReleaseEvidence.ps1',
     'windows/monitoring/OnyxReleasePolicy.py',
     'windows/monitoring/OnyxOperatorStatus.py',
     'windows/monitoring/OnyxOperatorReport.py',

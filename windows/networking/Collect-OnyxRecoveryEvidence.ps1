@@ -1,49 +1,80 @@
-# ONYX CORE v0.6.0 - read-only, manually invoked recovery evidence collector.
-# Isolated development state only. NEVER modifies ICS, services, or production telemetry.
+# ONYX CORE v0.7.0 - development-only manually invoked USB/ICS evidence collector.
+# Uses the validated config contract; never repairs ICS or production services.
 [CmdletBinding()]
 param(
-    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9.-]*$')]
-    [string]$PiHostName = 'svr-onyxcore.local',
-    [ValidatePattern('^[A-Za-z0-9_][A-Za-z0-9_.-]*$')]
-    [string]$PiUser = 'onyxpi',
-    [string]$UpstreamInterface = 'Ethernet',
-    [ValidateRange(0,3600)]
-    [int]$StartupGraceSeconds = 180,
-    [ValidateRange(10,90)]
-    [int]$SshTimeoutSeconds = 45,
-    [ValidateRange(500,10000)]
-    [int]$UpstreamTcpTimeoutMs = 3000,
-    [string]$MonitorKeyPath = (Join-Path $env:USERPROFILE '.ssh\onyxcore_monitor_ed25519'),
-    [string]$HistoryPath = (Join-Path $env:LOCALAPPDATA 'OnyxCore-v060-Development\recovery-observations.json')
+    [string]$ConfigPath = (Join-Path $PSScriptRoot '..\monitoring\monitoring.development.example.json'),
+    [switch]$LiveReadOnly
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# No implicit probes, state writes or SSH. Every real cycle requires opt-in.
+if (-not $LiveReadOnly) {
+    throw 'Refusing to run diagnostic probes without explicit -LiveReadOnly.'
+}
+
 $Directory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Repository = (Resolve-Path (Join-Path $Directory '..\..')).Path
 $WindowsDiagnostic = Join-Path $Directory 'Test-OnyxUsbIcsReadiness.ps1'
 $DecisionEngine = Join-Path $Directory 'Evaluate-OnyxRecovery.py'
+$Validator = Join-Path $Repository 'windows\monitoring\OnyxMonitorConfig.py'
+$ApprovedConfigPath = Join-Path $Repository 'windows\monitoring\monitoring.development.example.json'
 $MaxHistoryAgeSeconds = 300
 $MaxObservations = 12
 $MaxHistoryBytes = 262144
 
-# Verify both the branch and the dedicated worktree name before any I/O/probes.
-$Branch = (& git -C $Repository branch --show-current)
-if ($LASTEXITCODE -ne 0 -or $Branch -ne 'feature/v0.6.0-reliability' -or
-    (Split-Path -Leaf $Repository) -ne 'onyx-core-v060') {
-    throw 'Refusing to run outside the isolated v0.6.0 development worktree.'
+# Verify development-only isolation BEFORE any external network activity.
+$Branch = & git -C $Repository branch --show-current
+if ($LASTEXITCODE -ne 0 -or $Branch -ne 'feature/v0.7.0-monitoring' -or
+    (Split-Path -Leaf $Repository) -ne 'onyx-core-v070') {
+    throw 'Refusing to run outside the isolated v0.7.0 development worktree.'
 }
-foreach ($Path in @($WindowsDiagnostic, $DecisionEngine)) {
+foreach ($Path in @($WindowsDiagnostic, $DecisionEngine, $Validator, $ApprovedConfigPath)) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "Required development component missing: $Path"
     }
 }
-if (-not (Test-Path -LiteralPath $MonitorKeyPath -PathType Leaf)) {
-    throw "Dedicated SSH private key not found: $MonitorKeyPath"
+$ResolvedConfigPath = (Resolve-Path -LiteralPath $ConfigPath -ErrorAction Stop).Path
+if ($ResolvedConfigPath -ne (Resolve-Path -LiteralPath $ApprovedConfigPath).Path) {
+    throw 'Only the approved development configuration file may be used.'
 }
-$SshExecutable = Get-Command 'ssh.exe' -CommandType Application -ErrorAction Stop
-$SshPath = $SshExecutable.Source
+
+# The bootstrap Python path is pinned to the verified SQUALL development runtime.
+# The validator rejects unsafe or production state paths and non-read-only settings.
+$BootstrapPython = 'C:\Python313\python.exe'
+if (-not (Test-Path -LiteralPath $BootstrapPython -PathType Leaf)) {
+    throw 'Approved development Python runtime missing.'
+}
+$null = & $BootstrapPython $Validator --check $ResolvedConfigPath
+if ($LASTEXITCODE -ne 0) {
+    throw 'Monitoring configuration validation failed; refusing diagnostic probes.'
+}
+$Config = Get-Content -LiteralPath $ResolvedConfigPath -Raw -Encoding UTF8 |
+    ConvertFrom-Json -ErrorAction Stop
+
+$AdapterName = [string]$Config.windows.adapter_name
+$GatewayIP = [string]$Config.windows.gateway_ip
+$ReceiverIP = [string]$Config.windows.receiver_ip
+$ReceiverPort = [int]$Config.windows.receiver_port
+$ReceiverTimeoutMs = [int]$Config.timeouts.receiver_tcp_ms
+$UpstreamInterface = [string]$Config.windows.upstream_interface
+$PiHostName = [string]$Config.pi.hostname
+$PiUser = [string]$Config.pi.user
+$StartupGraceSeconds = [int]$Config.startup_grace_seconds
+$SshTimeoutSeconds = [int]$Config.timeouts.ssh_seconds
+$UpstreamTcpTimeoutMs = [int]$Config.timeouts.upstream_tcp_ms
+$MonitorKeyPath = [Environment]::ExpandEnvironmentVariables([string]$Config.pi.monitor_key_path)
+$HistoryDirectory = [Environment]::ExpandEnvironmentVariables([string]$Config.state_dir)
+$HistoryPath = Join-Path $HistoryDirectory 'recovery-observations.json'
+$PythonExecutable = [string]$Config.runtime.python_executable
+$SshPath = [string]$Config.runtime.ssh_executable
+
+foreach ($Path in @($MonitorKeyPath, $PythonExecutable, $SshPath)) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Required runtime file missing: $Path"
+    }
+}
 
 function Invoke-OnyxBoundedSsh {
     param(
@@ -206,10 +237,10 @@ function Write-OnyxHistory {
     $Parent = Split-Path -Parent $Path
     if (-not $Parent) { throw 'History path must have a parent directory.' }
     $null = New-Item -ItemType Directory -Path $Parent -Force -ErrorAction Stop
-    $TemporaryPath = Join-Path $Parent ('.onyx-v060-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    $TemporaryPath = Join-Path $Parent ('.onyx-v070-' + [guid]::NewGuid().ToString('N') + '.tmp')
     # .NET Framework / Windows PowerShell 5.1 may reject a null backup path.
     # Keep the swap atomic by using a valid backup in the SAME directory.
-    $BackupPath = Join-Path $Parent ('.onyx-v060-' + [guid]::NewGuid().ToString('N') + '.bak')
+    $BackupPath = Join-Path $Parent ('.onyx-v070-' + [guid]::NewGuid().ToString('N') + '.bak')
     try {
         $Payload = @{
             schema_version = 1
@@ -237,16 +268,21 @@ function Write-OnyxHistory {
 }
 
 # Prevent concurrent invocations from interleaving reads/writes or counting duplicates.
-$Mutex = New-Object System.Threading.Mutex($false, 'Local\OnyxCoreV060RecoveryEvidence')
+$Mutex = New-Object System.Threading.Mutex($false, 'Local\OnyxCoreV070RecoveryEvidence')
 $LockTaken = $false
 try {
     try { $LockTaken = $Mutex.WaitOne(0) }
     catch [System.Threading.AbandonedMutexException] { $LockTaken = $true }
-    if (-not $LockTaken) { throw 'Another v0.6.0 evidence collection is in progress.' }
+    if (-not $LockTaken) { throw 'Another v0.7.0 evidence collection is in progress.' }
 
     $WindowsError = $null
     try {
-        $WindowsResult = & $WindowsDiagnostic
+        $WindowsResult = & $WindowsDiagnostic `
+            -AdapterName $AdapterName `
+            -GatewayIP $GatewayIP `
+            -ReceiverIP $ReceiverIP `
+            -ReceiverPort $ReceiverPort `
+            -TimeoutMs $ReceiverTimeoutMs
         if ($null -eq $WindowsResult -or -not $WindowsResult.Classification) {
             throw 'Windows diagnostic returned no classification.'
         }
@@ -343,7 +379,7 @@ try {
     try {
         $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [IO.File]::WriteAllText($TemporaryFile, ($Report | ConvertTo-Json -Depth 12), $Utf8NoBom)
-        $DecisionOutput = & python $DecisionEngine --input $TemporaryFile
+        $DecisionOutput = & $PythonExecutable $DecisionEngine --input $TemporaryFile
         if ($LASTEXITCODE -ne 0) { throw 'Decision engine exited unsuccessfully.' }
         $Decision = ($DecisionOutput -join "`n") | ConvertFrom-Json -ErrorAction Stop
         if ($null -eq $Decision -or $Decision.repair_action -ne 'None') {

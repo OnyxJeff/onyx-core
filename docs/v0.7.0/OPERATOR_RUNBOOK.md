@@ -1,8 +1,8 @@
-# ONYX CORE v0.7.0 — Release Operator Runbook (Candidate)
+# ONYX CORE v0.7.0 — Release Operator Runbook (Post-Merge)
 
-**Status:** REVIEW ONLY. The commands below that target `main` are **future-use procedures**, not permission to run them now. Production currently remains v0.6.0.\
+**Status:** Production source is on merged v0.7.0; one approved first-run diagnostic and store initialization completed. Examples are reference procedures only and do not authorize another live cycle, state reset, repair, tagging or publication.\
 **Operator platform:** Windows 11 SQUALL, Windows PowerShell 5.1.\
-**Reviewed candidate:** `9a98172b15463b661c462d810a0b812245cdcf3f`.
+**Reviewed final candidate:** Checkpoint P `ef255f4fb7e5892a501ab19a01c8f8c18a3999ff`; PR #16 merge commit `98606451f19071f7d7f6fe7b8d498ee4a449a890`.
 
 ## 1. What the commands do
 
@@ -29,7 +29,7 @@ Perform these checks after an **approved merge and deliberate checkout update**,
 - Release store is derived from `%LOCALAPPDATA%\OnyxCore-v070-Release\Monitoring` **for the Windows user running the CLI**. Use the intended operator account consistently; a different Windows user sees a different store.
 - Before first use, review the release-store directory, all ancestor junction/reparse points, access permissions, and any prior marker, store, lock, observations, or unknown files. The development incident store is unrelated and must not be reset or imported.
 
-**SQUALL passive observations (2026-11-09):** `Ethernet 3` was Up, ICS `SharedAccess` Running/Automatic, `192.168.137.1/24` present, receiver neighbor cache listed `192.168.137.167` as Reachable, and legacy `10.12.194.9/24` was also present. None of this proves live SSH, receiver health, or current Internet connectivity.
+**SQUALL passive observations (2026-11-09):** `Ethernet 3` was Up, ICS `SharedAccess` Running/Automatic, `192.168.137.1/24` present, receiver neighbor cache listed `192.168.137.167` as Reachable, and legacy `10.12.194.9/24` was also present. These were passive-only observations; a separately authorized diagnostic later recorded `Healthy` / `Complete` evidence at `2026-11-10T04:01:38.970124Z`, without proving ongoing connectivity.
 
 ## 3. Offline setup validation — only after merge and local deployment approval
 
@@ -55,7 +55,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Release config refused.' }
 if ($LASTEXITCODE -ne 0) { throw 'Existing-store preflight refused.' }
 ```
 
-**For a confirmed brand-new release store**, only after separately reviewing and approving the initial state:
+**Historical first-use procedure for a brand-new release store ONLY** (initialization is already completed on SQUALL; do not rerun it):
 
 ```powershell
 & $Py (Join-Path $Prod 'windows\monitoring\OnyxReleaseCyclePreflight.py') `
@@ -77,7 +77,7 @@ For a previously initialized release store:
 if ($LASTEXITCODE -ne 0) { throw 'Release diagnostic refused or failed.' }
 ```
 
-For a genuinely empty store **only after the separate first-run authorization**:
+For a genuinely empty store **only after separate first-run authorization** (already used once for this release store; never use again on this initialized store):
 
 ```powershell
 & $Py (Join-Path $Prod 'windows\monitoring\OnyxReleaseLiveIncident.py') `
@@ -89,7 +89,7 @@ The Python entry point checks release source and policy, takes an exclusive cycl
 
 ## 6. Historical operator views — no new probe
 
-Available only after successful release-store initialization:
+Now available because the first release-store initialization succeeded; these commands are historical reads only:
 
 ```powershell
 & $Py (Join-Path $Prod 'windows\monitoring\OnyxReleaseReadOnly.py') `
@@ -113,3 +113,13 @@ Optional `--json` is supported. `--events` accepts 0–20; report staleness thre
 ## 8. Explicit approval record
 
 Before any production live use, record the exact approved Git commit, operator Windows account, release config/adapter/receiver, protected state inventory, date/time, and specific approval for: (1) release deployment, (2) one live diagnostic cycle, and (3) release-store initialization **if needed**. These are not implied by an offline test passing.
+
+## Post-merge acceptance and current operator state (2026-11-10)
+
+- Source: `D:\github_repos\onyx-core`, branch `main`, commit `98606451f19071f7d7f6fe7b8d498ee4a449a890`.
+- Operator for first cycle: `SQUALL\jmay2` (non-elevated Windows PowerShell 5.1).
+- Approved adapter / receiver: Windows `Ethernet 3`, `192.168.137.1/24` ICS gateway, Pi `192.168.137.167:8765`. The Pi dashboard is hosted on port 8765; localhost 18766 is a separate Windows testing/gateway port, not required by the one-shot monitor.
+- First and only authorized live cycle: `2026-11-10T04:01:38.970124Z`, `Healthy`, `Complete`, incident phase `Healthy`, generation 1, one processed cycle, no open incident, no transition events, `repair_action=None`.
+- The separate release store now contains five protected files. Preserve all five; `--initialize-new` is forbidden on this initialized store.
+- The historical status and age-aware report were verified without a second probe. At review time the report was `Recent` (205 seconds old); a later `Stale` status is expected until another **separately approved** live diagnostic is performed.
+- No scheduled monitoring, automatic remediation, service restart, source change, release tag or GitHub publication occurred as part of the one-shot acceptance.

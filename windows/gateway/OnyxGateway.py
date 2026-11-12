@@ -4,6 +4,7 @@ import http.server
 import ipaddress
 import json
 import re
+import sqlite3
 import sys
 import subprocess
 import urllib.error
@@ -69,6 +70,20 @@ class Gateway(http.server.BaseHTTPRequestHandler):
             return self.send_bytes(200, self.server.overlay, 'text/html; charset=utf-8', html=True)
         if parsed.path in ('/overlay-portrait', '/overlay-portrait/') and not parsed.query:
             return self.send_bytes(200, self.server.overlay_portrait, 'text/html; charset=utf-8', html=True)
+        # M4 development-only local incident history; never sent to the Pi.
+        if parsed.path == '/api/v1/monitor/summary':
+            if not self.server.v080_monitor_view:
+                return self.error(404, 'not_found')
+            if parsed.query:
+                return self.error(400, 'invalid_query')
+            try:
+                view = self.server.monitor_reader()
+                data = json.dumps(view, separators=(',', ':'), allow_nan=False).encode('utf-8')
+                if len(data) > 32768:
+                    return self.error(503, 'monitor_history_unavailable')
+                return self.send_bytes(200, data)
+            except (OSError, ValueError, RuntimeError, ImportError, sqlite3.Error):
+                return self.error(503, 'monitor_history_unavailable')
         if parsed.path not in ALLOWED_API:
             return self.error(404, 'not_found')
         if parsed.path != '/api/v1/history' and parsed.query:
@@ -114,7 +129,11 @@ def main():
     p.add_argument('--receiver', default='svr-onyxcore.local')
     p.add_argument('--port', type=int, default=18766)
     p.add_argument('--load-dpapi', action='store_true', help='Read protected token via local Windows PowerShell helper')
+    p.add_argument('--v080-monitor-view', action='store_true',
+                   help='Opt in to local v0.8 development incident history (read-only)')
     args = p.parse_args()
+    if args.v080_monitor_view and args.port == 18766:
+        p.error('M4 development view must use a separate port (e.g. 18767)')
     if not re.fullmatch(r'[A-Za-z0-9.-]{1,253}', args.receiver):
         p.error('receiver must be a hostname or IPv4 address')
     if not 1024 <= args.port <= 65535:
@@ -169,6 +188,10 @@ def main():
     server.overlay = overlay
     server.overlay_portrait = portrait
     server.token = token
+    server.v080_monitor_view = args.v080_monitor_view
+    if args.v080_monitor_view:
+        from OnyxMonitoringView import snapshot
+        server.monitor_reader = snapshot
     server.upstream = f'http://{args.receiver}:8765'
     server.opener = opener
     if sys.stdout is not None:

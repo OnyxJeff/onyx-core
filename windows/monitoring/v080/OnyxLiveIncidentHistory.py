@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """ONYX CORE v0.8 M3: explicit live monitoring with durable incident history.
 
-Only this entry point writes its own v0.8 development SQLite history. It
-reuses M2's real, sequential, read-only checks and its exclusive Windows mutex.
+Only this entry point writes v0.8 SQLite incident history in an explicitly
+selected isolated store. It reuses M2's real, sequential, read-only checks
+and its exclusive Windows mutex.
 It never repairs connectivity, creates tasks, or sends notifications.
 """
 from __future__ import annotations
@@ -23,18 +24,39 @@ MAX_HISTORY_RESULTS = 20
 CHECK_RETENTION = 30  # Days of individual checks; incident records are retained.
 VALID_STATUSES = frozenset(('Healthy', 'Degraded', 'Unknown'))
 VALID_ISSUES = frozenset(('WindowsDiagnosticUnavailable', 'PiDiagnosticUnavailable'))
+STORAGE_PROFILE_ENV = 'ONYXCORE_V080_STORAGE_PROFILE'
+STORAGE_DIRS = {
+    'development': 'OnyxCore-v080-Development',
+    'release': 'OnyxCore-v080-Release',
+}
 
 
 class HistoryError(RuntimeError):
     """A requested journal operation cannot be safely completed."""
 
 
+def storage_profile() -> str:
+    """Fail closed on an invalid explicit selection; no filesystem access."""
+    profile = os.environ.get(STORAGE_PROFILE_ENV, 'development')
+    if profile not in STORAGE_DIRS:
+        raise HistoryError('invalid v0.8 storage profile')
+    return profile
+
+
 def history_path() -> Path:
-    """Separate from the protected v0.7 stores and Pi telemetry database."""
+    """Shared, profile-scoped M3/M4/M5 journal path; never creates files.
+
+    The release profile opts in to a *storage path only*. M1's independent
+    development-only live-execution guard remains in force.
+    """
+    profile = storage_profile()
     root = os.environ.get('LOCALAPPDATA')
     if not root or not Path(root).is_absolute():
-        raise HistoryError('LOCALAPPDATA unavailable for development history')
-    return Path(root) / 'OnyxCore-v080-Development' / 'Monitoring' / 'incident-history.sqlite3'
+        raise HistoryError('LOCALAPPDATA unavailable for incident history')
+    base = Path(root)
+    if base.is_symlink() or (hasattr(base, 'is_junction') and base.is_junction()):
+        raise HistoryError('redirected LOCALAPPDATA path refused')
+    return base / STORAGE_DIRS[profile] / 'Monitoring' / 'incident-history.sqlite3'
 
 
 def _check_storage_path(path: Path, *, create: bool) -> None:
@@ -305,7 +327,7 @@ def main(argv: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--check-config', action='store_true', help='no checks and no store write')
     mode.add_argument('--record-live', action='store_true', help='real read-only probes + local incident history writes')
-    mode.add_argument('--history', action='store_true', help='read existing development history, no probes')
+    mode.add_argument('--history', action='store_true', help='read selected isolated history, no probes')
     duration = parser.add_mutually_exclusive_group()
     duration.add_argument('--count', type=int, help='live cycles (1-20)')
     duration.add_argument('--continuous', action='store_true', help='live foreground until Ctrl+C')
@@ -318,6 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error('live recording requires --count N or --continuous')
     try:
         if args.check_config:
+            storage_profile()  # Validate opt-in without accessing history storage.
             config = m2.m1.cfg.load_config(m2.m1.CONFIG)
             if not m2.MIN_INTERVAL <= args.interval_seconds <= m2.MAX_INTERVAL:
                 raise HistoryError('interval must be 90-3600 seconds')

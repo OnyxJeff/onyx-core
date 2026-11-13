@@ -38,8 +38,10 @@ class NotificationError(RuntimeError):
     """Safe-to-print notification error (never includes a webhook URL)."""
 
 
-def state_path() -> Path:
-    return m3.history_path().with_name(CURSOR_DB_NAME)
+def state_path(journal_path: Path | None = None) -> Path:
+    """Keep cursor and journal in the same selected profile."""
+    journal = m3.history_path() if journal_path is None else journal_path
+    return journal.with_name(CURSOR_DB_NAME)
 
 
 def _check_state_path(path: Path, *, create: bool) -> None:
@@ -296,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         if type(args.poll_seconds) is not int or not POLL_MIN <= args.poll_seconds <= POLL_MAX:
             raise NotificationError('poll interval must be 5–300 seconds')
         journal = m3.history_path()
-        cursor = state_path()
+        cursor = state_path(journal)
         if args.check_config:
             print('PASS: M5 notification watcher valid; no writes, probes or webhook delivery.')
             return 0

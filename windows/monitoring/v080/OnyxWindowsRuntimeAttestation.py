@@ -41,6 +41,9 @@ REQUIRED_FILES = (
     'windows/monitoring/OnyxMonitorConfig.py',
     'windows/monitoring/v080/Invoke-OnyxV080WindowsReadiness.ps1',
     'windows/networking/Test-OnyxUsbIcsReadiness.ps1',
+    # RC operational controls: installed source/ACL verification and foreground CLI.
+    'windows/monitoring/v080/OnyxWindowsProtectedInstallTrust.py',
+    'windows/monitoring/v080/OnyxV080ReleaseOperator.py',
 )
 MAX_BYTES = 512 * 1024
 INVALID_SESSION = 0xFFFFFFFF

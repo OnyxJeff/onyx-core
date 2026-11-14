@@ -12,10 +12,13 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import json
+import math
+import time
 from pathlib import Path
 from typing import Callable
 
 import OnyxGuardedRuntimeBridge as bridge
+import OnyxContinuousMonitor as m2
 import OnyxLiveConnectivity as m1
 import OnyxLiveIncidentHistory as m3
 import OnyxV080ReleaseProfile as profile
@@ -82,6 +85,47 @@ def release_history_path() -> Path:
     return path
 
 
+
+# Recheck revocation during M2's otherwise uninterrupted interval wait.
+# A blocked PowerShell/SSH worker remains bounded by its existing timeout and
+# Windows Job Object, not by this wait hook.
+REAUTH_SLEEP_SLICE_SECONDS = 2.0
+
+
+def _run_revocation_aware_monitor(config: dict, *, count: int,
+                                  interval_seconds: int, probe: Callable,
+                                  emit: Callable, authorize: Callable[[], bool],
+                                  sleep: Callable[[float], None] = time.sleep,
+                                  clock: Callable[[], float] = time.monotonic) -> int:
+    """Execute REAL M2 with bounded consent checks during its intercycle sleep.
+
+    This adapter does not issue consent, run without bridge locks, or launch a
+    background service. The default runtime bridge checks consent before each
+    probe and write; this adds checks while it would otherwise sleep.
+    """
+    if not all(callable(x) for x in (probe, emit, authorize, sleep, clock)):
+        raise ReleaseBindingRefused('release monitoring dependencies missing')
+
+    def require_authorized():
+        if authorize() is not True:
+            raise ReleaseBindingRefused('release monitoring consent revoked during wait')
+
+    def checked_sleep(seconds: float):
+        if (isinstance(seconds, bool) or not isinstance(seconds, (float, int))
+                or not math.isfinite(seconds) or seconds < 0 or seconds > 3600):
+            raise ReleaseBindingRefused('invalid monitor interval wait')
+        remaining = float(seconds)
+        while remaining > 0:
+            require_authorized()
+            pause = min(REAUTH_SLEEP_SLICE_SECONDS, remaining)
+            sleep(pause)
+            require_authorized()
+            remaining -= pause
+
+    return m2.run_monitor(config, count=count, interval_seconds=interval_seconds,
+                          probe=probe, emit=emit, sleeper=checked_sleep, clock=clock)
+
+
 def run_explicitly_approved_api(wiring: ReleaseWiring, *,
                                 build_authorizer: Callable = att.build_rechecking_authorizer,
                                 run_bridge: Callable = bridge.run_authorized_cycles):
@@ -113,6 +157,8 @@ def run_explicitly_approved_api(wiring: ReleaseWiring, *,
         storage_profile=require_release_storage_profile, history_path=release_history_path,
         load_config=lambda: profile.load_release_config(wiring.config_path),
         verify_context=verify_config, probe=m1.run_once,
+        monitor_loop=lambda c, **kw: _run_revocation_aware_monitor(
+            c, authorize=authorize, **kw),
     )
 
 

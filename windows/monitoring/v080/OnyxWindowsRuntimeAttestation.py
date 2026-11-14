@@ -31,6 +31,16 @@ REQUIRED_FILES = (
     'windows/monitoring/v080/OnyxWindowsNativeAdmission.py',
     'windows/monitoring/v080/OnyxWindowsUserConsent.py',
     'windows/monitoring/v080/OnyxWindowsRuntimeAttestation.py',
+    # R3 protected-launch runtime transitive imports and actual diagnostic scripts.
+    # A missing/modified entry must deny the next consent recheck, including
+    # before each probe, record and interval wake-up.
+    'windows/monitoring/v080/OnyxV080ReleaseBinding.py',
+    'windows/monitoring/v080/OnyxV080ReleaseProfile.py',
+    'windows/monitoring/v080/OnyxWindowsJobRunner.py',
+    'windows/monitoring/v080/OnyxV080ProtectedLaunch.py',
+    'windows/monitoring/OnyxMonitorConfig.py',
+    'windows/monitoring/v080/Invoke-OnyxV080WindowsReadiness.ps1',
+    'windows/networking/Test-OnyxUsbIcsReadiness.ps1',
 )
 MAX_BYTES = 512 * 1024
 INVALID_SESSION = 0xFFFFFFFF

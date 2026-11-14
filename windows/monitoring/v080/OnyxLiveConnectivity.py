@@ -215,9 +215,18 @@ def classify(windows: dict, pi: dict) -> tuple[str, str]:
     return 'Unknown', 'DiagnosticEvidenceUnavailable'
 
 
-def run_once(config: dict, *, runner: Callable = subprocess.run,
+def run_once(config: dict, *, runner: Callable | None = None,
              now: Callable = lambda: datetime.now(timezone.utc)) -> dict:
     """One manual, bounded Windows + SSH diagnostic; no persistence or scheduling."""
+    # Release diagnostics MUST use a process tree managed by Windows Job Objects.
+    # Development-only diagnostics retain their existing injected/default runner.
+    if config.get('profile') == 'release':
+        if runner is not None:
+            raise ConnectivityError('release diagnostic runner override refused')
+        from OnyxWindowsJobRunner import WindowsJobRunner
+        runner = WindowsJobRunner((str(PS5), config['runtime']['ssh_executable'])).run
+    elif runner is None:
+        runner = subprocess.run
     windows = {'classification': 'WindowsProbeUnavailable'}
     pi = {'classification': 'PiProbeUnavailable'}
     issues = []

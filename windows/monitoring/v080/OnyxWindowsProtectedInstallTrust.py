@@ -35,23 +35,62 @@ ROOT = Path(r'C:\Program Files\OnyxCore\v0.8.0')
 PYTHON = Path(r'C:\Python313\python.exe')
 
 
-def reject_ace(owner_sid: str, aces: tuple[tuple[int, str, int], ...]) -> None:
-    """Pure classifier: reject every nonprivileged write ACE (not just broad groups)."""
+# An inherit-only ACE grants no access to the *current* object. The inherited
+# ACE may become effective on a child, which assert_trusted_install separately
+# opens and checks. Do not confuse generic-all on CREATOR OWNER with effective
+# write permission on Program Files itself.
+INHERIT_ONLY_ACE = 0x08
+INHERIT_TARGET_FLAGS = 0x01 | 0x02
+KNOWN_DACL_ACE_FLAGS = 0x1F  # OI | CI | NO_PROPAGATE | INHERIT_ONLY | INHERITED
+
+
+def reject_ace(owner_sid: str, aces: tuple[tuple, ...]) -> None:
+    """Reject effective nonprivileged writes; inspect inheritance-only safely.
+
+    Native rules contain (type, SID, mask, flags). Legacy three-field injected
+    rules are supported with flags=0 solely for existing pure-test callers;
+    the native handle-backed reader always supplies the fourth field.
+    """
     if owner_sid not in PRIVILEGED_SIDS:
         raise InstallTrustRefused('trusted file owner is not privileged')
     if not aces:
         raise InstallTrustRefused('trusted file DACL has no inspectable rules')
-    for kind, sid, mask in aces:
-        # Only well-understood allow/deny ACE types accepted (object/callback
-        # ACEs have different structures and MUST fail closed).
-        if kind not in (0, 1) or not sid:
+    for rule in aces:
+        if not isinstance(rule, tuple) or len(rule) not in (3, 4):
+            raise InstallTrustRefused('malformed trusted ACL entry')
+        kind, sid, mask = rule[:3]
+        flags = rule[3] if len(rule) == 4 else 0
+        if (type(kind) is not int or kind not in (0, 1)
+                or not isinstance(sid, str) or not sid
+                or type(mask) is not int or mask < 0 or mask > 0xffffffff
+                or type(flags) is not int or flags < 0 or flags > 0xff
+                or flags & ~KNOWN_DACL_ACE_FLAGS):
             raise InstallTrustRefused('unsupported ACL entry')
+        if flags & INHERIT_ONLY_ACE:
+            # A valid inherit-only ACE must specify an object or container
+            # inheritance target. Ignore its access mask ONLY on this object.
+            if not (flags & INHERIT_TARGET_FLAGS):
+                raise InstallTrustRefused('invalid inherit-only ACL entry')
+            continue
         if kind == 0 and sid not in PRIVILEGED_SIDS and mask & WRITE_MASK:
             raise InstallTrustRefused('nonprivileged write permission in trusted path')
 
 
+def _decode_basic_ace_header(header: bytes) -> tuple[int, int, int]:
+    """Return (ACE type, access mask, ACE flags) from an 8-byte native header."""
+    if not isinstance(header, bytes) or len(header) != 8:
+        raise InstallTrustRefused('invalid trusted ACL header')
+    kind = header[0]
+    flags = header[1]
+    size = int.from_bytes(header[2:4], 'little')
+    mask = int.from_bytes(header[4:8], 'little')
+    if size < 12 or size > 65535 or kind not in (0, 1):
+        raise InstallTrustRefused('unsupported ACL entry format')
+    return kind, mask, flags
+
+
 def _handle_acl(path: Path):
-    """Return (owner SID, tuple(type,SID,mask)) from a native opened handle."""
+    """Return (owner SID, tuple(type,SID,mask,flags)) from native handles."""
     if os.name != 'nt':
         raise InstallTrustRefused('Windows handle security required')
     k = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -129,11 +168,8 @@ def _handle_acl(path: Path):
                 # ACCESS_ALLOWED_ACE and ACCESS_DENIED_ACE layouts:
                 # [type:BYTE flags:BYTE size:WORD mask:DWORD sid:...]
                 header = ctypes.string_at(pointer.value, 8)
-                kind, size = header[0], int.from_bytes(header[2:4], 'little')
-                if size < 12 or size > 65535 or kind not in (0, 1):
-                    raise InstallTrustRefused('unsupported ACL entry format')
-                mask = int.from_bytes(header[4:8], 'little')
-                aces.append((kind, sid_string(pointer.value + 8), mask))
+                kind, mask, flags = _decode_basic_ace_header(header)
+                aces.append((kind, sid_string(pointer.value + 8), mask, flags))
             return sid_string(owner), tuple(aces)
         finally:
             k.LocalFree(descriptor)

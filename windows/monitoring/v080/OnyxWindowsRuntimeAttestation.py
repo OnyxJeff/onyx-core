@@ -44,6 +44,9 @@ REQUIRED_FILES = (
     # RC operational controls: installed source/ACL verification and foreground CLI.
     'windows/monitoring/v080/OnyxWindowsProtectedInstallTrust.py',
     'windows/monitoring/v080/OnyxV080ReleaseOperator.py',
+    # R6: source-attested foreground-only supervision composition.
+    'windows/monitoring/v080/OnyxV080SessionSupervisor.py',
+    'windows/monitoring/v080/OnyxV080SessionIntegration.py',
 )
 MAX_BYTES = 512 * 1024
 INVALID_SESSION = 0xFFFFFFFF

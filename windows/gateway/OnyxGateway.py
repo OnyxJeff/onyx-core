@@ -2,6 +2,7 @@
 import argparse
 import http.server
 import ipaddress
+import os
 import json
 import re
 import sqlite3
@@ -130,10 +131,15 @@ def main():
     p.add_argument('--port', type=int, default=18766)
     p.add_argument('--load-dpapi', action='store_true', help='Read protected token via local Windows PowerShell helper')
     p.add_argument('--v080-monitor-view', action='store_true',
-                   help='Opt in to local v0.8 development incident history (read-only)')
+                   help='Opt in to local v0.8 incident history (read-only); release port 18768 requires release profile')
     args = p.parse_args()
     if args.v080_monitor_view and args.port == 18766:
-        p.error('M4 development view must use a separate port (e.g. 18767)')
+        p.error('Monitoring view must not run on protected production port 18766')
+    if args.port == 18768:
+        if not args.v080_monitor_view:
+            p.error('Release dashboard port 18768 requires explicit --v080-monitor-view')
+        if os.environ.get('ONYXCORE_V080_STORAGE_PROFILE') != 'release':
+            p.error('Release dashboard port 18768 requires the release storage profile')
     if not re.fullmatch(r'[A-Za-z0-9.-]{1,253}', args.receiver):
         p.error('receiver must be a hostname or IPv4 address')
     if not 1024 <= args.port <= 65535:

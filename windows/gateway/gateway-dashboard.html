@@ -128,7 +128,7 @@ body[data-view="streaming"] #health-panel .label{font-size:.75rem}
 .gateway-mode #connect,.gateway-mode #disconnect{display:none!important}
 /* v0.8.0 M4 is a diagnostic section, not a visual redesign. */
 #monitor-panel{display:none;margin-top:14px}
-body.monitor-development #monitor-panel{display:block}
+body.monitor-enabled #monitor-panel{display:block}
 body[data-view="streaming"] #monitor-panel{display:none!important}
 #monitor-list{padding-left:18px;margin-bottom:0;color:#aebaca;font-size:.9rem}
 #monitor-list li{margin-top:6px;overflow-wrap:anywhere}
@@ -161,7 +161,7 @@ body[data-view="streaming"] #monitor-panel{display:none!important}
 </section>
 <section class="panel" id="health-panel" style="margin-top:14px" aria-label="Health alerts"><div class="label">TELEMETRY HEALTH</div><div id="health-state" class="status stale">Not connected</div><p id="health-detail" aria-live="polite">Connect to check telemetry freshness.</p><p id="health-event" aria-live="polite"></p></section>
 <section class="panel" id="monitor-panel" aria-label="Windows and Raspberry Pi connectivity history">
-<div class="label">WINDOWS / PI CONNECTIVITY — v0.8 DEVELOPMENT</div>
+<div class="label">WINDOWS / PI CONNECTIVITY — v0.8</div>
 <div id="monitor-state" class="status stale" role="status">Awaiting history</div>
 <p id="monitor-detail" aria-live="polite">This section displays saved M3 checks, not a continuous connection probe.</p>
 <p id="monitor-last">No stored monitoring check yet.</p>
@@ -184,8 +184,8 @@ body[data-view="streaming"] #monitor-panel{display:none!important}
 (()=>{'use strict';
 const $=id=>document.getElementById(id);
 let token='',timer=null,busy=false,previousHealth=null;
-const gatewayMode=['http://127.0.0.1:18766','http://127.0.0.1:18767'].includes(location.origin);
-const monitorView=gatewayMode&&location.port==='18767';
+const gatewayMode=['http://127.0.0.1:18766','http://127.0.0.1:18767','http://127.0.0.1:18768'].includes(location.origin);
+const monitorView=gatewayMode&&['18767','18768'].includes(location.port);
 if(gatewayMode){document.documentElement.classList.add('gateway-mode');token='gateway-session';}
 const status=(text,klass)=>{$('status').textContent=text;$('status').className='status '+klass;};
 function uptime(seconds){if(!Number.isFinite(seconds))return '—';const d=Math.floor(seconds/86400),h=Math.floor(seconds%86400/3600),m=Math.floor(seconds%3600/60);return d+'d '+h+'h '+m+'m';}
@@ -394,7 +394,7 @@ setMode(savedMode);
 $('viewmode').addEventListener('change',()=>setMode($('viewmode').value));
 $('range').addEventListener('change',poll);
 if(monitorView){
- document.body.classList.add('monitor-development');
+ document.body.classList.add('monitor-enabled');
  pollMonitoring();setInterval(pollMonitoring,30000);
 }
 if(gatewayMode){

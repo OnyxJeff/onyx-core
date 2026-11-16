@@ -93,6 +93,27 @@ class SessionIntegrationTests(unittest.TestCase):
         result=self.run_it(policy=r4.SessionPolicy(2,10,self.interval))
         self.assertEqual((result.state,result.persisted_cycles),('Expired',1))
 
+    def test_deadline_after_verified_commit_reports_persistence_but_not_success(self):
+        # The bridge reported exactly one safely committed cycle, then the
+        # R4 clock passed the deadline before the supervisor acknowledged it.
+        def finished_worker(_w):
+            self.clock.value = 10.0
+            return bridge.BoundedRuntimeResult(1, 1, True)
+        result = self.run_it(policy=r4.SessionPolicy(2, 10, self.interval),
+                             worker=finished_worker)
+        self.assertEqual((result.state, result.attempts, result.completed_cycles,
+                          result.persisted_cycles), ('Expired', 1, 0, 1))
+        self.assertFalse(result.notifications_sent or result.repairs_invoked or
+                         result.tasks_created)
+
+    def test_deadline_after_unpersisted_worker_cannot_claim_a_write(self):
+        def incomplete_worker(_w):
+            self.clock.value = 10.0
+            return bridge.BoundedRuntimeResult(1, 0, True)
+        with self.assertRaisesRegex(r5.SessionIntegrationRefused, 'safe persisted'):
+            self.run_it(policy=r4.SessionPolicy(2, 10, self.interval),
+                        worker=incomplete_worker)
+
     def test_invalid_profile_before_worker(self):
         with patch.dict(os.environ,{'ONYXCORE_V080_STORAGE_PROFILE':'development'}):
             with self.assertRaises(binding.ReleaseBindingRefused): self.run_it()

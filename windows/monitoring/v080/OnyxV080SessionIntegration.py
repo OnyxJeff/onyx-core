@@ -86,7 +86,15 @@ def run_reviewed_session(*, wiring: binding.ReleaseWiring,
         clock=clock, sleep=sleep,
     )
     if persisted != outcome.completed_cycles:
-        raise SessionIntegrationRefused('supervisor/journal completion mismatch')
+        # A verified one-cycle bridge can finish writing just before the
+        # supervisor observes the absolute session deadline. R4 correctly
+        # reports Expired with no *timely completed* cycle in that case.
+        # Preserve the actual confirmed durable write in persisted_cycles,
+        # without declaring the expired session a success. At most one cycle
+        # may straddle the boundary because R5 runs workers sequentially.
+        if not (outcome.state == 'Expired' and
+                persisted == outcome.completed_cycles + 1):
+            raise SessionIntegrationRefused('supervisor/journal completion mismatch')
     return IntegrationResult(outcome.attempts, outcome.completed_cycles,
                              outcome.worker_failures, outcome.state, persisted)
 

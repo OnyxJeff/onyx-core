@@ -1,6 +1,6 @@
 """RC launch-control tests: PURE and injected; never invokes Win32 or live telemetry."""
 from __future__ import annotations
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -50,12 +50,33 @@ class OperatorRCTests(unittest.TestCase):
         self.assertEqual(set(doc), consent.GRANT_FIELDS)
 
     def test_duration_and_clock_validation(self):
-        for minutes in (0,1441,-10,True,1.2):
+        for minutes in (0,10081,-10,True,1.2):
             with self.subTest(minutes=minutes), self.assertRaises(op.OperatorRefused):
                 self.grant(minutes)
         with self.assertRaises(op.OperatorRefused):
             op.make_read_only_grant(sid=SID,commit=COMMIT,config_digest=CONFIG,
                                     now=datetime.now(),minutes=60)
+
+    def test_explicit_week_long_enrollment_is_bounded_and_revocable(self):
+        self.assertEqual(op.MAX_ENROLL_MINUTES, 10080)
+        raw = self.grant(minutes=10080)
+        doc = json.loads(raw)
+        self.assertEqual(doc['scope'], 'periodic_read_only_usb_ics')
+        self.assertTrue(doc['read_only'])
+        self.assertEqual(doc['repair_action'], 'None')
+        self.assertFalse(doc['notifications_enabled'])
+        self.assertEqual(doc['session_policy'], 'LoggedOnUserOnly')
+        self.assertTrue(consent.evaluate_grant(raw, context=self.context(), now=TIME))
+        self.assertTrue(consent.evaluate_grant(raw, context=self.context(), now=TIME + timedelta(days=6)))
+        with self.assertRaises(consent.ConsentRefused):
+            consent.evaluate_grant(raw, context=self.context(), now=TIME + timedelta(days=7))
+        with self.assertRaises(op.OperatorRefused):
+            self.grant(minutes=10081)
+        self.assertEqual(op._parser().parse_args(['--enroll-read-only']).expires_minutes, 60)
+        parsed = op._parser().parse_args(['--enroll-read-only', '--approve-enrollment',
+                                           '--expires-minutes', '10080'])
+        self.assertTrue(parsed.approve_enrollment)
+        self.assertTrue(parsed.enroll_read_only)
 
     def test_consents_unique_and_canonical(self):
         a,b=self.grant(),self.grant()

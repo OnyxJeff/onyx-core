@@ -1,13 +1,14 @@
 # ONYX CORE
 
-## Version status — v0.8.0-rc.1 (in preparation)
+## Version status — v0.8.0 (pre-merge review)
 
-**Development release-candidate target:** `v0.8.0-rc.1` — Continuous Monitoring & Operational Alerts. This is a **candidate preparation checkpoint**, not a published tag or deployment.
+**Candidate for review:** `v0.8.0` — opt-in Continuous Monitoring & Operational Alerts, in [draft PR #18](https://github.com/OnyxJeff/onyx-core/pull/18). **This is not a published GitHub release or a production deployment.**
 
-**Protected production baseline:** `v0.7.0` on SQUALL. The production collector, local gateway and monitoring histories remain unchanged. See [published releases](https://github.com/OnyxJeff/onyx-core/releases) for the actual latest published version.
+**Latest published production release:** `v0.7.0` on SQUALL. The existing telemetry collector, local gateway, OBS overlays and protected monitoring histories remain in place.
 
-The v0.8.0 work introduces continuous-monitoring supervision, incident lifecycle, operator visibility, protected-source admission and foreground-session prototypes. **Live session operation, unattended monitoring and notification delivery are not yet release-authorized.** Deadline/process containment and journal-persistence guarantees must pass independent R6.2 validation before promotion. See [RC1 scope and release gates](docs/v0.8.0/RC1_SCOPE_AND_RELEASE_GATES.md).
+The proposed v0.8.0 adds explicitly authorized foreground read-only connectivity monitoring, SQLite incident history and durable receipts, an optional local monitoring dashboard, and a separately opt-in notification watcher. It **does not automatically enable unattended monitoring, notification delivery, network repairs, or new Scheduled Tasks**.
 
+The final candidate passed 1,410 SQUALL offline tests (10 expected skips), 5/5 synthetic native containment checks, and 8/8 low-integrity release-path checks. The installed protected source still requires final reconciliation, live read-only operational acceptance and rollback verification before PR merge or release publication. See the [pre-merge checklist](docs/v0.8.0/PRE_MERGE_RELEASE_CHECKLIST.md) and [release notes](docs/v0.8.0/RELEASE_NOTES.md).
 
 **USB-connected desktop telemetry companion for Windows 11 and an original Raspberry Pi Zero (ARMv6).**
 

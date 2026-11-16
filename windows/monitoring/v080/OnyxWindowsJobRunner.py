@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import threading
 from typing import Callable
 
@@ -64,7 +65,8 @@ class WindowsJobRunner:
         self.allowed_executables = frozenset(normalized)
         self._backend = _backend
 
-    def run(self, command, *, capture_output=True, timeout=None, check=False, env=None):
+    def run(self, command, *, capture_output=True, timeout=None, check=False, env=None,
+            consent_check=None, low_integrity=False):
         if type(command) is not list or not command or len(command) > 64 or any(
                 type(x) is not str or not x or len(x) > 4096 or '\x00' in x or '\r' in x or '\n' in x
                 for x in command):
@@ -73,6 +75,10 @@ class WindowsJobRunner:
             raise JobRunnerRefused('unapproved diagnostic executable')
         if capture_output is not True or check is not False or env is not None:
             raise JobRunnerRefused('unsupported process execution mode')
+        if consent_check is not None and not callable(consent_check):
+            raise JobRunnerRefused('invalid live authorization callback')
+        if type(low_integrity) is not bool:
+            raise JobRunnerRefused('invalid security isolation policy')
         if type(timeout) is not int or not 1 <= timeout <= MAX_TIMEOUT_SECONDS:
             raise JobRunnerRefused('worker timeout must be 1..90 seconds')
         if len(subprocess.list2cmdline(command)) >= 32700:
@@ -80,8 +86,14 @@ class WindowsJobRunner:
         if self._backend is None:
             if os.name != 'nt':
                 raise JobRunnerRefused('Windows native Job Object required')
-            backend = _run_windows_native
+            if consent_check is not None or low_integrity:
+                backend = lambda cmd, seconds: _run_windows_native(
+                    cmd, seconds, consent_check=consent_check, low_integrity=low_integrity)
+            else:
+                backend = _run_windows_native
         else:
+            if consent_check is not None or low_integrity:
+                raise JobRunnerRefused('injected backend cannot attest native isolation')
             backend = self._backend
         try:
             result = backend(command, timeout)
@@ -96,7 +108,70 @@ class WindowsJobRunner:
         return result
 
 
-def _run_windows_native(command: list[str], timeout: int) -> subprocess.CompletedProcess:
+def _retain_current_job_processes(kernel, job) -> list:
+    """Pin identity-bound process handles BEFORE issuing job termination.
+
+    Job accounting / PID lists alone are not termination-completion barriers.
+    Windows opens SYNCHRONIZE+QUERY_LIMITED handles only for members verified
+    against the actual job; inability to audit a current member fails closed.
+    """
+    from ctypes import wintypes
+
+    pids = None
+    for capacity in (16, 32, 64, 128, 256):
+        class JOB_PID_LIST(ctypes.Structure):
+            _fields_ = [('NumberOfAssignedProcesses', ctypes.c_uint32),
+                        ('NumberOfProcessIdsInList', ctypes.c_uint32),
+                        ('ProcessIdList', ctypes.c_size_t * capacity)]
+        entry = JOB_PID_LIST()
+        ok = kernel.QueryInformationJobObject(job, 3, ctypes.byref(entry),
+                                               ctypes.sizeof(entry), None)
+        if not ok:
+            if ctypes.get_last_error() == 234:  # ERROR_MORE_DATA
+                continue
+            raise JobRunnerRefused('cannot enumerate contained Job members')
+        count = int(entry.NumberOfProcessIdsInList)
+        assigned = int(entry.NumberOfAssignedProcesses)
+        if count > capacity:
+            raise JobRunnerRefused('invalid Windows Job PID-list response')
+        if assigned > count:
+            continue  # Windows requests a larger complete result buffer.
+        pids = [int(entry.ProcessIdList[i]) for i in range(count)]
+        break
+    if pids is None:
+        raise JobRunnerRefused('contained Job PID list exceeds audit limit')
+    if any(pid <= 0 for pid in pids) or len(pids) != len(set(pids)):
+        raise JobRunnerRefused('invalid contained Job process identity list')
+    retained = []
+    try:
+        for pid in pids:
+            handle = kernel.OpenProcess(0x00100000 | 0x1000, False, pid)
+            if not handle:
+                if ctypes.get_last_error() == 87:  # exited before OpenProcess
+                    continue
+                raise JobRunnerRefused('cannot open contained Job member for audit')
+            retained.append(handle)
+            member = wintypes.BOOL()
+            if (not kernel.IsProcessInJob(handle, job, ctypes.byref(member)) or
+                    not member.value):
+                raise JobRunnerRefused('Job PID is not a verified member')
+        return retained
+    except BaseException:
+        for handle in retained:
+            kernel.CloseHandle(handle)
+        raise
+
+
+def _require_signaled_handles(kernel, handles, *, deadline: float) -> None:
+    """A successful per-process wait, not a zero Job count, proves exit."""
+    for handle in handles:
+        remaining = max(0, int((deadline - time.monotonic()) * 1000))
+        if kernel.WaitForSingleObject(handle, remaining) != 0:
+            raise JobRunnerRefused('worker process-tree exit not confirmed')
+
+
+def _run_windows_native(command: list[str], timeout: int, *,
+                        consent_check=None, low_integrity=False) -> subprocess.CompletedProcess:
     """Native Windows worker: suspended -> job assign -> resume -> bounded wait.
 
     This path cannot be exercised on Linux; Windows host smoke tests are a
@@ -184,6 +259,8 @@ def _run_windows_native(command: list[str], timeout: int) -> subprocess.Complete
     kernel.ResumeThread.restype = DWORD
     kernel.WaitForSingleObject.argtypes = [HANDLE, DWORD]
     kernel.WaitForSingleObject.restype = DWORD
+    kernel.QueryInformationJobObject.argtypes = [HANDLE, ctypes.c_int, LPVOID, DWORD, ctypes.POINTER(DWORD)]
+    kernel.QueryInformationJobObject.restype = wintypes.BOOL
     kernel.GetExitCodeProcess.argtypes = [HANDLE, ctypes.POINTER(DWORD)]
     kernel.GetExitCodeProcess.restype = wintypes.BOOL
     kernel.TerminateJobObject.argtypes = [HANDLE, ctypes.c_uint]
@@ -192,10 +269,86 @@ def _run_windows_native(command: list[str], timeout: int) -> subprocess.Complete
     kernel.TerminateProcess.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = [HANDLE]
     kernel.CloseHandle.restype = wintypes.BOOL
+    kernel.OpenProcess.argtypes = [DWORD, wintypes.BOOL, DWORD]
+    kernel.OpenProcess.restype = HANDLE
+    kernel.IsProcessInJob.argtypes = [HANDLE, HANDLE, ctypes.POINTER(wintypes.BOOL)]
+    kernel.IsProcessInJob.restype = wintypes.BOOL
+
+    # Restrict the entire diagnostic Python worker to LOW Windows integrity.
+    # This is mandatory access control (no write-up), not just Python promises.
+    # A native host acceptance test MUST prove the release journal is medium+
+    # integrity and deny write access to the low-integrity worker.
+    advapi = ctypes.WinDLL('advapi32', use_last_error=True)
+    kernel.GetCurrentProcess.argtypes = []
+    kernel.GetCurrentProcess.restype = HANDLE
+    advapi.OpenProcessToken.argtypes = [HANDLE, DWORD, ctypes.POINTER(HANDLE)]
+    advapi.OpenProcessToken.restype = wintypes.BOOL
+    advapi.CreateRestrictedToken.argtypes = [HANDLE, DWORD, DWORD, LPVOID, DWORD, LPVOID,
+                                              DWORD, LPVOID, ctypes.POINTER(HANDLE)]
+    advapi.CreateRestrictedToken.restype = wintypes.BOOL
+    advapi.ConvertStringSidToSidW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(LPVOID)]
+    advapi.ConvertStringSidToSidW.restype = wintypes.BOOL
+    advapi.GetLengthSid.argtypes = [LPVOID]
+    advapi.GetLengthSid.restype = DWORD
+    advapi.SetTokenInformation.argtypes = [HANDLE, ctypes.c_int, LPVOID, DWORD]
+    advapi.SetTokenInformation.restype = wintypes.BOOL
+    advapi.CreateProcessAsUserW.argtypes = [
+        HANDLE, wintypes.LPCWSTR, wintypes.LPWSTR, LPVOID, LPVOID,
+        wintypes.BOOL, DWORD, LPVOID, wintypes.LPCWSTR,
+        ctypes.POINTER(STARTUPINFO), ctypes.POINTER(PROCESS_INFORMATION),
+    ]
+    advapi.CreateProcessAsUserW.restype = wintypes.BOOL
+    kernel.LocalFree.argtypes = [LPVOID]
+    kernel.LocalFree.restype = LPVOID
+
+    class SID_AND_ATTRIBUTES(ctypes.Structure):
+        _fields_ = [('Sid', LPVOID), ('Attributes', DWORD)]
+
+    class TOKEN_MANDATORY_LABEL(ctypes.Structure):
+        _fields_ = [('Label', SID_AND_ATTRIBUTES)]
+
+    class JOB_ACCOUNTING(ctypes.Structure):
+        _fields_ = [
+            ('TotalUserTime', ctypes.c_int64), ('TotalKernelTime', ctypes.c_int64),
+            ('ThisPeriodTotalUserTime', ctypes.c_int64), ('ThisPeriodTotalKernelTime', ctypes.c_int64),
+            ('TotalPageFaultCount', DWORD), ('TotalProcesses', DWORD),
+            ('ActiveProcesses', DWORD), ('TotalTerminatedProcesses', DWORD),
+        ]
 
     def checked(ok, stage):
         if not ok:
             raise JobRunnerRefused('%s refused (Win32=%d)' % (stage, ctypes.get_last_error()))
+
+    def cleanup_tree(job, primary) -> None:
+        # TerminateJobObject is asynchronous. Acquire the member handles
+        # first; after termination, wait for each independently. Always issue
+        # TerminateJobObject even when enumeration itself fails.
+        handles = []
+        capture_error = None
+        try:
+            handles = _retain_current_job_processes(kernel, job)
+        except BaseException as exc:
+            capture_error = exc
+        try:
+            terminated = kernel.TerminateJobObject(job, 1)
+            if capture_error is not None:
+                raise JobRunnerRefused('cannot prove all Job member identities') from capture_error
+            checked(terminated, 'TerminateJobObject')
+            deadline = time.monotonic() + 3
+            _require_signaled_handles(kernel, [primary, *handles], deadline=deadline)
+            while True:
+                accounting = JOB_ACCOUNTING()
+                checked(kernel.QueryInformationJobObject(job, 1,
+                    ctypes.byref(accounting), ctypes.sizeof(accounting), None),
+                    'QueryInformationJobObject')
+                if accounting.ActiveProcesses == 0:
+                    return
+                if time.monotonic() >= deadline:
+                    raise JobRunnerRefused('worker job accounting did not drain')
+                time.sleep(0.025)
+        finally:
+            for handle in handles:
+                kernel.CloseHandle(handle)
 
     # Real worker creation is serialized because inheritable std handles must
     # briefly exist while CreateProcessW uses an explicit HANDLE_LIST.
@@ -209,11 +362,19 @@ def _run_windows_native(command: list[str], timeout: int) -> subprocess.Complete
         child = PROCESS_INFORMATION()
         child_created = False
         child_assigned = False
+        cleanup_confirmed = False
+        parent_token = HANDLE()
+        child_token = HANDLE()
+        integrity_sid = LPVOID()
         try:
             job = kernel.CreateJobObjectW(None, None)
             checked(job, 'CreateJobObjectW')
             limits = EXTENDED_LIMIT()
             limits.BasicLimitInformation.LimitFlags = 0x00002000  # KILL_ON_JOB_CLOSE
+            if low_integrity:
+                # Bound aggregate worker + PowerShell/SSH memory to 384 MiB.
+                limits.BasicLimitInformation.LimitFlags |= 0x00000200  # JOB_MEMORY
+                limits.JobMemoryLimit = 384 * 1024 * 1024
             checked(kernel.SetInformationJobObject(job, 9, ctypes.byref(limits),
                                                    ctypes.sizeof(limits)), 'SetInformationJobObject')
 
@@ -239,14 +400,37 @@ def _run_windows_native(command: list[str], timeout: int) -> subprocess.Complete
             cmd = ctypes.create_unicode_buffer(subprocess.list2cmdline(command))
             flags = 0x00000004 | 0x00080000 | 0x08000000  # SUSPENDED, EXTENDED, NO_WINDOW
 
+            if low_integrity:
+                # Restricted primary token: caller privilege reduction plus LOW
+                # mandatory integrity. No unrestricted fallback is permitted.
+                checked(advapi.OpenProcessToken(kernel.GetCurrentProcess(),
+                    0x0002 | 0x0008 | 0x0001 | 0x0080, ctypes.byref(parent_token)),
+                    'OpenProcessToken')
+                checked(advapi.CreateRestrictedToken(parent_token, 0x1, 0, None,
+                    0, None, 0, None, ctypes.byref(child_token)), 'CreateRestrictedToken')
+                checked(advapi.ConvertStringSidToSidW('S-1-16-4096',
+                    ctypes.byref(integrity_sid)), 'ConvertStringSidToSidW')
+                mandatory_label = TOKEN_MANDATORY_LABEL(
+                    SID_AND_ATTRIBUTES(integrity_sid, 0x20))
+                checked(advapi.SetTokenInformation(child_token, 25,
+                    ctypes.byref(mandatory_label),
+                    ctypes.sizeof(mandatory_label) + advapi.GetLengthSid(integrity_sid)),
+                    'SetTokenInformation(LOW)')
+            if consent_check is not None and consent_check() is not True:
+                raise JobRunnerRefused('worker authorization revoked before creation')
+
             prior = [os.get_handle_inheritable(h) for h in handles]
             try:
                 for h in handles:
                     os.set_handle_inheritable(h, True)
-                created = kernel.CreateProcessW(
-                    command[0], cmd, None, None, True, flags,
-                    None, None, ctypes.byref(sx.StartupInfo), ctypes.byref(child),
-                )
+                if low_integrity:
+                    created = advapi.CreateProcessAsUserW(
+                        child_token, command[0], cmd, None, None, True, flags,
+                        None, None, ctypes.byref(sx.StartupInfo), ctypes.byref(child))
+                else:
+                    created = kernel.CreateProcessW(
+                        command[0], cmd, None, None, True, flags,
+                        None, None, ctypes.byref(sx.StartupInfo), ctypes.byref(child))
                 checked(created, 'CreateProcessW')
                 child_created = True
             finally:
@@ -258,13 +442,25 @@ def _run_windows_native(command: list[str], timeout: int) -> subprocess.Complete
             if kernel.ResumeThread(child.hThread) == 0xFFFFFFFF:
                 raise JobRunnerRefused('ResumeThread refused')
 
-            wait = kernel.WaitForSingleObject(child.hProcess, timeout * 1000)
-            if wait == 0x00000102:  # WAIT_TIMEOUT
-                kernel.TerminateJobObject(job, 1)
-                kernel.WaitForSingleObject(child.hProcess, 3000)
-                raise subprocess.TimeoutExpired(command, timeout)
-            if wait != 0:  # WAIT_OBJECT_0
-                raise JobRunnerRefused('WaitForSingleObject refused')
+            deadline = time.monotonic() + timeout
+            while True:
+                if time.monotonic() >= deadline:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                if consent_check is not None and consent_check() is not True:
+                    raise JobRunnerRefused('worker authorization revoked during execution')
+                remaining_ms = max(1, min(250, int((deadline - time.monotonic()) * 1000)))
+                wait = kernel.WaitForSingleObject(child.hProcess, remaining_ms)
+                if wait == 0:  # main process exited
+                    break
+                if wait != 0x00000102:  # WAIT_TIMEOUT
+                    raise JobRunnerRefused('WaitForSingleObject refused')
+
+            # Pin every discoverable member before terminating the Job. A
+            # zero accounting count alone can precede process-handle signaling.
+            cleanup_tree(job, child.hProcess)
+            cleanup_confirmed = True
+            if consent_check is not None and consent_check() is not True:
+                raise JobRunnerRefused('worker authorization revoked after exit')
             code = DWORD(0)
             checked(kernel.GetExitCodeProcess(child.hProcess, ctypes.byref(code)), 'GetExitCodeProcess')
             stdout.flush()
@@ -275,6 +471,20 @@ def _run_windows_native(command: list[str], timeout: int) -> subprocess.Complete
             return subprocess.CompletedProcess(command, ctypes.c_int32(code.value).value,
                                                stdout=captured, stderr=b'')
         finally:
+            # Aborted/success paths must confirm *all* children terminated,
+            # including on consent revocation or native API errors.
+            cleanup_refused = False
+            if job and child_assigned and not cleanup_confirmed:
+                try:
+                    cleanup_tree(job, child.hProcess)
+                except BaseException:
+                    cleanup_refused = True
+            if integrity_sid:
+                kernel.LocalFree(integrity_sid)
+            if child_token:
+                kernel.CloseHandle(child_token)
+            if parent_token:
+                kernel.CloseHandle(parent_token)
             # Fail-closed: if assignment failed, the suspended child must be
             # explicitly terminated; job closing alone cannot kill an unassigned child.
             if child_created and not child_assigned:
@@ -287,6 +497,8 @@ def _run_windows_native(command: list[str], timeout: int) -> subprocess.Complete
                 kernel.CloseHandle(child.hProcess)
             if attr_ready:
                 kernel.DeleteProcThreadAttributeList(attr_buffer)
+            if cleanup_refused:
+                raise JobRunnerRefused('worker process-tree exit not confirmed')
 
 
 def inert_status() -> dict:

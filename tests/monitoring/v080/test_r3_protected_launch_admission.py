@@ -68,7 +68,11 @@ class ProtectedLaunchAdmissionTests(unittest.TestCase):
             result.wiring,
             build_authorizer=lambda **kwargs: lambda: True,
             run_bridge=fake_bridge), 'OFFLINE-ONLY')
-        self.assertIs(calls[0][1]['probe'], binding.m1.run_once)
+        self.assertIsNot(calls[0][1]['probe'], binding.m1.run_once)
+        from unittest.mock import patch
+        with patch.object(binding.contained, 'run_protected_probe', return_value={'synthetic': True}) as isolated:
+            self.assertEqual(calls[0][1]['probe']({'profile': 'release'}), {'synthetic': True})
+            isolated.assert_called_once()
         self.assertEqual(calls[0][0].cycles, 2)
 
     def test_manifest_covers_new_runtime_scripts_and_imports(self):

@@ -130,7 +130,11 @@ class ReleaseIntegrationTests(unittest.TestCase):
         policy, kw = captures[0]
         self.assertEqual((policy.cycles, policy.interval_seconds), (2, 120))
         self.assertEqual(kw['approved_sid'], SID)
-        self.assertIs(kw['probe'], binding.m1.run_once)
+        self.assertIsNot(kw['probe'], binding.m1.run_once)
+        from unittest.mock import patch
+        with patch.object(binding.contained, 'run_protected_probe', return_value={'synthetic': True}) as isolated:
+            self.assertEqual(kw['probe'](self.base), {'synthetic': True})
+            isolated.assert_called_once_with(self.base, source_root=self.root, authorize=kw['authorize_cycle'])
         self.assertIs(kw['history_path'], binding.release_history_path)
         self.assertIs(kw['storage_profile'], binding.require_release_storage_profile)
         self.assertTrue(kw['authorize_cycle']())

@@ -143,6 +143,15 @@ def _run_protected_session(*, reviewed, context, att, binding, checker,
         reviewed.wiring.source_root, reviewed.wiring.config_path,
         reviewed.wiring.manifest, reviewed.wiring.approved_sid, cycles=1)
     config = binding.read_reviewed_release_config(wiring)
+    # Fixed monotonic budget shared by the supervisor and the actual bridge.
+    # No re-arming when a cycle blocks or fails.
+    started = clock()
+    if type(started) is bool or not isinstance(started, (int, float)):
+        raise OperatorRefused('invalid session clock')
+    import math
+    if not math.isfinite(started):
+        raise OperatorRefused('invalid session clock')
+    deadline = float(started) + duration_minutes * 60
     policy = supervision.SessionPolicy(
         maximum_cycles=cycles,
         maximum_duration_seconds=duration_minutes * 60,
@@ -163,7 +172,16 @@ def _run_protected_session(*, reviewed, context, att, binding, checker,
         return True
     def one_cycle(one):
         def real_authorizer(**kwargs):
-            return att.build_rechecking_authorizer(**kwargs, source_checker=checker)
+            native_check = att.build_rechecking_authorizer(
+                **kwargs, source_checker=checker)
+            def check_with_session_budget():
+                # Check before AND after native source/SID/consent verification.
+                # This also binds the bridge's probe/write authorization path.
+                if clock() >= deadline:
+                    return False
+                approved = native_check()
+                return approved is True and clock() < deadline
+            return check_with_session_budget
         return binding.run_explicitly_approved_api(
             one, build_authorizer=real_authorizer)
     outcome = integration.run_reviewed_session(

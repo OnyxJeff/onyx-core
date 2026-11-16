@@ -127,10 +127,32 @@ class BridgeTests(unittest.TestCase):
         self.assertIn('global-exit', self.events)
 
     def test_revocation_before_second_probe(self):
-        self.permits[5] = False
+        # Revoke between finished cycles, not at a fragile authorization count.
+        # R6.2A adds valid security checks before/after probe and persistence.
+        state = {'revoked': False}
+
+        def checked_authorizer():
+            self.events.append('authorize')
+            return not state['revoked']
+
+        def observed_probe(_config):
+            self.events.append('probe')
+            return {'fixture': True}
+
+        def revoke_between_cycles(config, *, count, interval_seconds, probe, emit):
+            self.events.append('loop')
+            emit(probe(config))               # First cycle finishes and persists.
+            state['revoked'] = True           # Revoke BEFORE the second probe.
+            emit(probe(config))               # Must refuse before probing/recording.
+            return count
+
         with self.assertRaises(bridge.RuntimeBridgeRefused):
-            self.run_bridge()
+            self.run_bridge(authorize_cycle=checked_authorizer,
+                            monitor_loop=revoke_between_cycles,
+                            probe=observed_probe)
         self.assertEqual(self.events.count('record'), 1)
+        self.assertEqual(self.events.count('probe'), 1)
+        self.assertEqual(self.events[-2:], ['foreground-exit', 'global-exit'])
 
     def test_authorizer_raises_no_cycle(self):
         def denied():
@@ -174,11 +196,24 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(self.events[-2:], ['foreground-exit', 'global-exit'])
 
     def test_success_exact_two_cycles(self):
-        result = self.run_bridge()
+        def observed_probe(_config):
+            self.events.append('probe')
+            return {'fixture': True}
+
+        result = self.run_bridge(probe=observed_probe)
         self.assertEqual(result.cycles, 2)
         self.assertEqual(result.persisted_cycles, 2)
         self.assertEqual(self.events.count('record'), 2)
-        self.assertEqual(self.events.count('authorize'), 7)
+        self.assertEqual(self.events.count('probe'), 2)
+        # Check the security boundaries, not the total number of checks.
+        # In R6.2A both the probe and recorder must be authorized immediately
+        # before invocation and immediately after returning.
+        for action in ('probe', 'record'):
+            positions = [i for i, event in enumerate(self.events) if event == action]
+            self.assertEqual(len(positions), 2)
+            for i in positions:
+                self.assertEqual(self.events[i - 1], 'authorize')
+                self.assertEqual(self.events[i + 1], 'authorize')
         self.assertEqual(self.events[1:3], ['global-enter', 'foreground-enter'])
         self.assertEqual(self.events[-2:], ['foreground-exit', 'global-exit'])
         self.assertTrue(result.live_mode)

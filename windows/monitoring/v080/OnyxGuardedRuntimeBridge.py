@@ -61,6 +61,8 @@ def run_authorized_cycles(
         monitor_loop: Callable = m2.run_monitor,
         probe: Callable = m2.m1.run_once,
         recorder: Callable = m3.record_cycle,
+        transactional_recorder: Callable | None = None,
+        use_cycle_receipts: bool = False,
 ) -> BoundedRuntimeResult:
     """Wire actual M1→M2→M3 with per-cycle authorization and native mutex.
 
@@ -82,6 +84,12 @@ def run_authorized_cycles(
         recorder,
     )):
         raise RuntimeBridgeRefused('missing runtime adapter or authorizer')
+
+    if transactional_recorder is not None and not callable(transactional_recorder):
+        raise RuntimeBridgeRefused('invalid transactional recorder')
+    if type(use_cycle_receipts) is not bool or (use_cycle_receipts and
+                                               transactional_recorder is None):
+        raise RuntimeBridgeRefused('cycle receipts require an explicit transactional recorder')
 
     # Even a well-formed SID passed by the caller is not trusted enrollment.
     sid = native.validate_sid(approved_sid)
@@ -111,12 +119,37 @@ def run_authorized_cycles(
 
             def guarded_probe(c: dict) -> dict:
                 require_authorized()
-                return probe(c)
+                observation = probe(c)
+                # Do not accept a result if authorization expired mid-probe.
+                require_authorized()
+                return observation
 
             def guarded_record(result: dict) -> None:
                 nonlocal persisted
                 require_authorized()  # Re-check after potential network delay.
-                recorder(path, result)
+                if transactional_recorder is None:
+                    recorder(path, result)
+                else:
+                    # Release binding supplies M3's parent-only transactional
+                    # writer. A fresh authorization gate is checked by M3
+                    # before opening and inside the transaction pre-COMMIT.
+                    def fresh_commit_authorization() -> bool:
+                        require_authorized()
+                        return True
+                    if use_cycle_receipts:
+                        # Parent derives a stable ID from the VALIDATED
+                        # observation. Replays of that exact observation,
+                        # including across restarts, use the same receipt.
+                        operation_id = m3.cycle_operation_id(result)
+                        transactional_recorder(
+                            path, result, authorize_commit=fresh_commit_authorization,
+                            operation_id=operation_id)
+                    else:
+                        transactional_recorder(
+                            path, result, authorize_commit=fresh_commit_authorization)
+                # Detect late commit for fail-closed reporting. This DOES NOT
+                # undo SQLite COMMIT or prove hard deadline containment.
+                require_authorized()
                 persisted += 1
 
             completed = monitor_loop(

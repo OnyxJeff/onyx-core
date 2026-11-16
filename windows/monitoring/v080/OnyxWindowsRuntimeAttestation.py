@@ -47,6 +47,8 @@ REQUIRED_FILES = (
     # R6: source-attested foreground-only supervision composition.
     'windows/monitoring/v080/OnyxV080SessionSupervisor.py',
     'windows/monitoring/v080/OnyxV080SessionIntegration.py',
+    # R6.2B2B: pinned standalone low-integrity one-shot diagnostic child.
+    'windows/monitoring/v080/OnyxV080ContainedProbe.py',
 )
 MAX_BYTES = 512 * 1024
 INVALID_SESSION = 0xFFFFFFFF

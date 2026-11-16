@@ -85,6 +85,9 @@ def _wait_bounded(seconds: float, *, deadline: float, clock: Callable[[], float]
     # Honor absolute deadline rather than resetting it after a worker failure.
     remaining = float(seconds)
     while remaining > 0:
+        # Deadline outranks consent: an expired session is not a revocation.
+        if _finite_time(clock()) >= deadline:
+            return False
         _approved(authorize, session, source)
         available = deadline - _finite_time(clock())
         if available <= 0:
@@ -93,8 +96,13 @@ def _wait_bounded(seconds: float, *, deadline: float, clock: Callable[[], float]
         if pause <= 0:
             return False
         sleep(pause)
+        # Do not turn natural expiration into a consent refusal at the edge.
+        if _finite_time(clock()) >= deadline:
+            return False
         # Reevaluate immediately after every <= 2s bounded slice.
         _approved(authorize, session, source)
+        if _finite_time(clock()) >= deadline:
+            return False
         remaining -= pause
     return deadline > _finite_time(clock())
 
@@ -133,6 +141,10 @@ def supervise_session(policy: SessionPolicy, *,
         # Exceptions are NOT silently classified as retryable: caller must
         # explicitly classify worker faults without losing authorization errors.
         result = run_one_cycle()
+        # This is an accounting guard, not child termination or write rollback.
+        # A worker that crosses the limit must never count as a timely success.
+        if _finite_time(clock()) >= deadline:
+            return SessionOutcome(attempts, successes, failures, 'Expired')
         if type(result) is not bool:
             raise SupervisionRefused('worker must report explicit boolean completion')
         if result:

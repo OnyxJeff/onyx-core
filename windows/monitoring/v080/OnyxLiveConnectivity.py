@@ -227,6 +227,21 @@ def run_once(config: dict, *, runner: Callable | None = None,
         runner = WindowsJobRunner((str(PS5), config['runtime']['ssh_executable'])).run
     elif runner is None:
         runner = subprocess.run
+    return _run_once_from_bounded_workers(config, runner=runner, now=now)
+
+
+def _run_once_from_bounded_workers(config: dict, *, runner: Callable,
+                                   now: Callable = lambda: datetime.now(timezone.utc)) -> dict:
+    """Diagnostic-only M1 composition for precontained low-integrity workers.
+
+    The protected child must verify its native LOW token first. The trusted
+    outer Job Object already owns every descendant and enforces a hard budget;
+    the nested WindowsJobRunner needs medium-integrity writable temp files and
+    is therefore NOT usable from the LOW child. Bounded subprocess pipes and
+    the outer Job Object are the controlled alternative. No journal writes.
+    """
+    if not callable(runner) or not callable(now):
+        raise ConnectivityError('contained diagnostic adapters missing')
     windows = {'classification': 'WindowsProbeUnavailable'}
     pi = {'classification': 'PiProbeUnavailable'}
     issues = []

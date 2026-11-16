@@ -23,6 +23,7 @@ import OnyxLiveConnectivity as m1
 import OnyxLiveIncidentHistory as m3
 import OnyxV080ReleaseProfile as profile
 import OnyxWindowsRuntimeAttestation as att
+import OnyxV080ContainedProbe as contained
 
 
 class ReleaseBindingRefused(RuntimeError):
@@ -156,7 +157,10 @@ def run_explicitly_approved_api(wiring: ReleaseWiring, *,
         policy, approved_sid=wiring.approved_sid, authorize_cycle=authorize,
         storage_profile=require_release_storage_profile, history_path=release_history_path,
         load_config=lambda: profile.load_release_config(wiring.config_path),
-        verify_context=verify_config, probe=m1.run_once,
+        verify_context=verify_config, probe=lambda c: contained.run_protected_probe(
+            c, source_root=wiring.source_root, authorize=authorize),
+        transactional_recorder=m3.record_cycle,
+        use_cycle_receipts=True,
         monitor_loop=lambda c, **kw: _run_revocation_aware_monitor(
             c, authorize=authorize, **kw),
     )

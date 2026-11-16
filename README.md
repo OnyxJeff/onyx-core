@@ -1,5 +1,14 @@
 # ONYX CORE
 
+## Version status — v0.8.0-rc.1 (in preparation)
+
+**Development release-candidate target:** `v0.8.0-rc.1` — Continuous Monitoring & Operational Alerts. This is a **candidate preparation checkpoint**, not a published tag or deployment.
+
+**Protected production baseline:** `v0.7.0` on SQUALL. The production collector, local gateway and monitoring histories remain unchanged. See [published releases](https://github.com/OnyxJeff/onyx-core/releases) for the actual latest published version.
+
+The v0.8.0 work introduces continuous-monitoring supervision, incident lifecycle, operator visibility, protected-source admission and foreground-session prototypes. **Live session operation, unattended monitoring and notification delivery are not yet release-authorized.** Deadline/process containment and journal-persistence guarantees must pass independent R6.2 validation before promotion. See [RC1 scope and release gates](docs/v0.8.0/RC1_SCOPE_AND_RELEASE_GATES.md).
+
+
 **USB-connected desktop telemetry companion for Windows 11 and an original Raspberry Pi Zero (ARMv6).**
 
 [![Latest release](https://img.shields.io/github/v/release/OnyxJeff/onyx-core?label=release)](https://github.com/OnyxJeff/onyx-core/releases/latest)
@@ -8,11 +17,8 @@
 
 ONYX CORE collects hardware telemetry from a Windows gaming and streaming PC over a private USB Ethernet gadget connection, stores readings on a Raspberry Pi Zero, and presents them through desktop and streaming dashboards. The reference deployment monitors **SQUALL**, a Windows 11 PC with an AMD Ryzen 7 5800X and NVIDIA GeForce RTX 3070 Ti, using **svr-onyxcore**, an original Raspberry Pi Zero Rev 1.3.
 
-**Latest release: [v0.6.0 — USB/ICS Reliability Diagnostics](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.6.0)**
 
-**Previous release: [v0.5.1 — Portrait OBS Overlay](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.1)**
 
-**Production deployment verified: v0.5.1 — Portrait OBS Overlay**
 
 Version 0.6.0 adds read-only Windows USB/ICS and Raspberry Pi forwarding diagnostics, restricted SSH evidence collection, and a fail-closed recovery decision policy. **These tools are manual and have not been deployed as an unattended production monitor; automatic ICS repair is not implemented.**
 
@@ -164,7 +170,9 @@ For the release-readiness runner, use `windows/networking/Test-OnyxRecoveryMiles
 | [v0.4.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.4.0) | Health Monitoring & Local Alerts |
 | [v0.5.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.0) | Desktop Companion & Streaming |
 | [v0.5.1](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.1) | Portrait OBS Overlay — production verified |
-| **[v0.6.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.6.0)** | **USB/ICS Reliability Diagnostics — latest release; manual diagnostics, not deployed** |
+| **[v0.6.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.6.0)** | **USB/ICS Reliability Diagnostics — manual diagnostics, not deployed** |
+| v0.7.0 | Protected production baseline — monitoring and release reliability |
+| **v0.8.0-rc.1 (preparation)** | **Continuous Monitoring & Operational Alerts — NOT PUBLISHED; live security NO-GO** |
 | v1.0.0 | Planned stable installation and maintenance baseline |
 
 See [all releases](https://github.com/OnyxJeff/onyx-core/releases) for detailed release notes.

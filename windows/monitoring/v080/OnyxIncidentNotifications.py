@@ -274,7 +274,8 @@ def _latest_check_time(journal_path: Path) -> datetime | None:
 def poll_monitor_liveness(journal_path: Path, cursor_path: Path,
                           deliver: Callable[[dict], None], *,
                           now: datetime | None = None,
-                          stale_after_seconds: int = 420) -> str:
+                          stale_after_seconds: int = 420,
+                          silence_until: datetime | None = None) -> str:
     """Durable status notice if no checks arrive while the watcher is alive.
 
     A first-time watcher establishes a grace baseline; repeat stale alerts are
@@ -287,6 +288,11 @@ def poll_monitor_liveness(journal_path: Path, cursor_path: Path,
     if not isinstance(clock, datetime) or clock.tzinfo is None or clock.utcoffset() is None:
         raise NotificationError('monitor-liveness clock must be aware')
     clock = clock.astimezone(timezone.utc)
+    if silence_until is not None:
+        if (not isinstance(silence_until, datetime) or silence_until.tzinfo is None
+                or silence_until.utcoffset() is None):
+            raise NotificationError('monitor startup grace must be an aware timestamp')
+        silence_until = silence_until.astimezone(timezone.utc)
     latest = _latest_check_time(journal_path)
     conn = _state_connection(cursor_path, create=True)
     assert conn is not None
@@ -308,6 +314,15 @@ def poll_monitor_liveness(journal_path: Path, cursor_path: Path,
         first_seen = m3._utc(row['first_seen_utc'])
         fresh = (latest is not None and latest <= clock + timedelta(seconds=60) and
                  latest >= clock - timedelta(seconds=stale_after_seconds))
+        # A normal boot can revive an old Fresh cursor before the first new
+        # monitor cycle. During the start-up grace period, do not emit either
+        # Stale or Resumed. Silently rebase a fresh observation to Fresh; a
+        # missing observation becomes eligible for exactly one Stale later.
+        if silence_until is not None and clock < silence_until:
+            if fresh and state != 'Fresh':
+                conn.execute("UPDATE monitor_liveness SET state='Fresh' WHERE id=1")
+                conn.commit()
+            return 'Fresh' if fresh else 'Waiting'
         if state == 'Waiting':
             if fresh:
                 conn.execute("UPDATE monitor_liveness SET state='Fresh' WHERE id=1")
@@ -399,6 +414,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.provider == 'discord' and token:
             raise NotificationError('Discord uses URL token; optional bearer token must be unset')
         print('M5: opt-in watcher enabled, provider {}. No previous events will be backfilled on first start.'.format(args.provider), flush=True)
+        # The watcher may start before the monitor's first post-login cycle.
+        # Delay liveness notices, not incident events, for one threshold window.
+        startup_silence_until = (datetime.now(timezone.utc) +
+            timedelta(seconds=args.monitor_stale_seconds) if args.monitor_stale_seconds else None)
         with exclusive_watcher():
             failures = 0
             while True:
@@ -415,7 +434,8 @@ def main(argv: list[str] | None = None) -> int:
                         poll_monitor_liveness(journal, cursor,
                             lambda event: send_webhook(event, url=url, provider=args.provider,
                                                        allow_private_http=args.allow_private_http, token=token),
-                            stale_after_seconds=args.monitor_stale_seconds)
+                            stale_after_seconds=args.monitor_stale_seconds,
+                            silence_until=startup_silence_until)
                     time.sleep(args.poll_seconds)
                 except (NotificationError, sqlite3.Error, m3.HistoryError, OSError) as exc:
                     failures += 1

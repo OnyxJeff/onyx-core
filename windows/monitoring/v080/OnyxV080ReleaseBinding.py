@@ -127,6 +127,21 @@ def _run_revocation_aware_monitor(config: dict, *, count: int,
                           probe=probe, emit=emit, sleeper=checked_sleep, clock=clock)
 
 
+def _record_confirmed_release_cycle(path: Path, result: dict, *,
+                                    authorize_commit: Callable[[], bool],
+                                    operation_id: str | None = None) -> dict:
+    """Use the selected three-failure/two-healthy policy in the protected writer.
+
+    Retains the bridge's fresh pre-commit authorization and receipt identity.
+    No unchecked or development-mode writer is added.
+    """
+    if not callable(authorize_commit):
+        raise ReleaseBindingRefused('release incident commit authorization required')
+    return m3.record_cycle(
+        path, result, authorize_commit=authorize_commit,
+        operation_id=operation_id, confirmed_incidents=True)
+
+
 def run_explicitly_approved_api(wiring: ReleaseWiring, *,
                                 build_authorizer: Callable = att.build_rechecking_authorizer,
                                 run_bridge: Callable = bridge.run_authorized_cycles):
@@ -159,7 +174,7 @@ def run_explicitly_approved_api(wiring: ReleaseWiring, *,
         load_config=lambda: profile.load_release_config(wiring.config_path),
         verify_context=verify_config, probe=lambda c: contained.run_protected_probe(
             c, source_root=wiring.source_root, authorize=authorize),
-        transactional_recorder=m3.record_cycle,
+        transactional_recorder=_record_confirmed_release_cycle,
         use_cycle_receipts=True,
         monitor_loop=lambda c, **kw: _run_revocation_aware_monitor(
             c, authorize=authorize, **kw),

@@ -199,6 +199,10 @@ def send_webhook(event: dict, *, url: str, provider: str,
                  transport: Callable | None = None) -> None:
     _validate_url(url, allow_private_http=allow_private_http)
     body, headers = _payload(event, provider)
+    if provider == 'discord':
+        # Discord's HTTP API requires an identified User-Agent; the default
+        # urllib User-Agent can be denied by its edge filter with HTTP 403.
+        headers['User-Agent'] = 'DiscordBot (https://github.com/OnyxJeff/onyx-core, 0.8.0)'
     if token:
         if not isinstance(token, str) or len(token) > 1024 or any(ord(c) in (10,13) for c in token):
             raise NotificationError('invalid optional alert token')

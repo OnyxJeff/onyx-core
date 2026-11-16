@@ -145,14 +145,25 @@ def run_alerts() -> int:
     The watcher sends nothing until a new incident/stale transition exists.
     """
     try:
-        _verified_runtime()
+        _op, reviewed, _ctx, att, consent, _binding, checker = _verified_runtime()
         if (os.environ.get('ONYXCORE_V080_STORAGE_PROFILE') != 'release' or
                 os.environ.get('ONYXCORE_V080_ALERT_WEBHOOK_URL') is None or
                 os.environ.get('ONYXCORE_V080_ALERT_TOKEN')):
             raise LogonRuntimeRefused('protected Discord context missing')
+        def authorized():
+            try:
+                return att.build_rechecking_authorizer(
+                    root=reviewed.wiring.source_root,
+                    manifest=reviewed.wiring.manifest,
+                    config=reviewed.wiring.config_path,
+                    approved_sid=reviewed.wiring.approved_sid,
+                    source_checker=checker)() is True
+            except consent.ConsentRefused:
+                return False
         from OnyxIncidentNotifications import main as watcher_main
         return watcher_main(['--watch','--provider','discord',
-                             '--poll-seconds','15','--monitor-stale-seconds','420'])
+                             '--poll-seconds','15','--monitor-stale-seconds','420'],
+                            watch_authorizer=authorized)
     except KeyboardInterrupt:
         return 0
     except Exception:

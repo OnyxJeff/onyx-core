@@ -38,6 +38,10 @@ class NotificationError(RuntimeError):
     """Safe-to-print notification error (never includes a webhook URL)."""
 
 
+class WatchConsentEnded(Exception):
+    """Stop the watcher quietly after protected read-only consent ends."""
+
+
 def state_path(journal_path: Path | None = None) -> Path:
     """Keep cursor and journal in the same selected profile."""
     journal = m3.history_path() if journal_path is None else journal_path
@@ -383,7 +387,8 @@ def exclusive_watcher():
         kernel.CloseHandle(handle)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *,
+         watch_authorizer: Callable[[], bool] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--check-config', action='store_true', help='no writes, network or events')
@@ -413,6 +418,17 @@ def main(argv: list[str] | None = None) -> int:
         # Ensure no token is sent to Discord endpoints using URL secret paths.
         if args.provider == 'discord' and token:
             raise NotificationError('Discord uses URL token; optional bearer token must be unset')
+        if watch_authorizer is not None and not callable(watch_authorizer):
+            raise NotificationError('watcher authorization callback invalid')
+        def require_watch_consent():
+            if watch_authorizer is not None and watch_authorizer() is not True:
+                raise WatchConsentEnded()
+        def deliver_checked(event):
+            # In addition to polling authorization, recheck immediately before
+            # every individual POST (incidents and liveness).
+            require_watch_consent()
+            send_webhook(event, url=url, provider=args.provider,
+                         allow_private_http=args.allow_private_http, token=token)
         print('M5: opt-in watcher enabled, provider {}. No previous events will be backfilled on first start.'.format(args.provider), flush=True)
         # The watcher may start before the monitor's first post-login cycle.
         # Delay liveness notices, not incident events, for one threshold window.
@@ -422,21 +438,25 @@ def main(argv: list[str] | None = None) -> int:
             failures = 0
             while True:
                 try:
-                    report = poll_once(journal, cursor,
-                        lambda event: send_webhook(event, url=url, provider=args.provider,
-                                                   allow_private_http=args.allow_private_http, token=token))
+                    # Do not read/advance notification cursors or emit a stale
+                    # alert while the protected monitor is deliberately paused.
+                    require_watch_consent()
+                    report = poll_once(journal, cursor, deliver_checked)
                     failures = 0
                     if report['initialized']:
                         print('M5: existing journal events acknowledged as baseline; watching for new incidents.', flush=True)
                     if report['sent']:
                         print('M5: {} incident notification(s) delivered.'.format(report['sent']), flush=True)
                     if args.monitor_stale_seconds:
-                        poll_monitor_liveness(journal, cursor,
-                            lambda event: send_webhook(event, url=url, provider=args.provider,
-                                                       allow_private_http=args.allow_private_http, token=token),
+                        require_watch_consent()
+                        poll_monitor_liveness(journal, cursor, deliver_checked,
                             stale_after_seconds=args.monitor_stale_seconds,
                             silence_until=startup_silence_until)
                     time.sleep(args.poll_seconds)
+                except WatchConsentEnded:
+                    print('M5: protected monitoring consent ended; watcher paused.',
+                          file=sys.stderr, flush=True)
+                    return 0
                 except (NotificationError, sqlite3.Error, m3.HistoryError, OSError) as exc:
                     failures += 1
                     # Only safe error objects from our controlled wrappers are printed.

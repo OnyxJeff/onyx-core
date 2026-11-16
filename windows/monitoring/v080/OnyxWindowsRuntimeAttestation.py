@@ -49,6 +49,13 @@ REQUIRED_FILES = (
     'windows/monitoring/v080/OnyxV080SessionIntegration.py',
     # R6.2B2B: pinned standalone low-integrity one-shot diagnostic child.
     'windows/monitoring/v080/OnyxV080ContainedProbe.py',
+    # Opt-in protected user-logon monitor and Discord notification entrypoints.
+    # Every executable source involved in user-logon launch is protected.
+    'windows/monitoring/v080/OnyxV080ProtectedLogonRuntime.py',
+    'windows/monitoring/v080/OnyxIncidentNotifications.py',
+    'windows/monitoring/v080/operations/Start-OnyxV080ProtectedDiscord.ps1',
+    'windows/monitoring/v080/operations/Install-OnyxV080ProtectedUserTasks.ps1',
+    'windows/monitoring/v080/operations/Remove-OnyxV080ProtectedUserTasks.ps1',
 )
 MAX_BYTES = 512 * 1024
 INVALID_SESSION = 0xFFFFFFFF

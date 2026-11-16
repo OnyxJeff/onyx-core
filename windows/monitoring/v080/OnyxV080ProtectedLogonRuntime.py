@@ -120,6 +120,16 @@ def run_monitor() -> int:
             reviewed=reviewed, context=context, att=att,
             binding=binding, checker=checker,
             cycles=SESSION_CYCLES, duration_minutes=SESSION_MINUTES)
+    # The protected release binding refuses the default development store.
+    # The unattended entrypoint must select the approved release history just
+    # as the existing foreground operator does, without accepting a caller's
+    # explicit nonrelease selection or changing the caller's environment.
+    profile_name = 'ONYXCORE_V080_STORAGE_PROFILE'
+    previous_profile = os.environ.get(profile_name)
+    if previous_profile not in (None, 'release'):
+        print('ONYX CORE protected logon monitor refused.', file=sys.stderr)
+        return 2
+    os.environ[profile_name] = 'release'
     try:
         outcome = run_bounded_logon_loop(bootstrap=bootstrap,
                                          run_session=one_session,
@@ -131,6 +141,11 @@ def run_monitor() -> int:
         # Fail closed. Never print source paths, credentials, or exception text.
         print('ONYX CORE protected logon monitor refused.', file=sys.stderr)
         return 2
+    finally:
+        if previous_profile is None:
+            os.environ.pop(profile_name, None)
+        else:
+            os.environ[profile_name] = previous_profile
     if outcome['result'] == 'CONSENT_REQUIRED':
         print('ONYX CORE: monitoring paused; explicit enrollment required.',
               file=sys.stderr)

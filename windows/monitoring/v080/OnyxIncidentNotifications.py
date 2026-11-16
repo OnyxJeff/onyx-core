@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import ipaddress
 import json
 import os
@@ -108,6 +108,17 @@ def _read_events(path: Path, after: int | None) -> tuple[int, list[dict]]:
 
 def _message(event: dict) -> str:
     """No free-form reason, hostnames, network output, tokens or PII."""
+    if event.get('event_type') in ('MonitorStale', 'MonitorResumed'):
+        # Status notices are distinct from incident events; no fictitious
+        # incident number is generated for a monitor-liveness warning.
+        expected = ('Unknown' if event['event_type'] == 'MonitorStale' else 'Healthy')
+        if (event.get('status') != expected or event.get('id') != 0 or
+                event.get('incident_id') != 0):
+            raise NotificationError('invalid monitor-liveness notification')
+        return ('ONYX CORE: monitoring is STALE; Windows/Pi checks have stopped '
+                'arriving. Last known connectivity state is not current.'
+                if event['event_type'] == 'MonitorStale' else
+                'ONYX CORE: monitoring has resumed reporting fresh Windows/Pi checks.')
     if (type(event.get('id')) is not int or event['id'] < 1 or
             type(event.get('incident_id')) is not int or event['incident_id'] < 1 or
             event.get('event_type') not in ('Opened', 'Recovered') or
@@ -167,7 +178,7 @@ def _payload(event: dict, provider: str) -> tuple[bytes, dict[str, str]]:
         return msg.encode('utf-8'), {
             'Content-Type': 'text/plain; charset=utf-8',
             'Title': 'ONYX CORE connectivity',
-            'Tags': 'warning' if event['event_type'] == 'Opened' else 'white_check_mark',
+            'Tags': 'warning' if event['event_type'] in ('Opened', 'MonitorStale') else 'white_check_mark',
         }
     if provider == 'discord':
         body = {'content': msg}
@@ -244,6 +255,75 @@ def poll_once(journal_path: Path, cursor_path: Path, deliver: Callable[[dict], N
         conn.close()
 
 
+
+def _latest_check_time(journal_path: Path) -> datetime | None:
+    conn = m3._connect(journal_path, write=False)
+    if conn is None:
+        return None
+    try:
+        row = conn.execute('SELECT observed_at_utc FROM checks ORDER BY id DESC LIMIT 1').fetchone()
+        return None if row is None else m3._utc(row[0])
+    finally:
+        conn.close()
+
+
+def poll_monitor_liveness(journal_path: Path, cursor_path: Path,
+                          deliver: Callable[[dict], None], *,
+                          now: datetime | None = None,
+                          stale_after_seconds: int = 420) -> str:
+    """Durable status notice if no checks arrive while the watcher is alive.
+
+    A first-time watcher establishes a grace baseline; repeat stale alerts are
+    suppressed across watcher restarts. Network delivery precedes state commit
+    (at-least-once semantics). Does NOT detect a powered-off host.
+    """
+    if type(stale_after_seconds) is not int or not 180 <= stale_after_seconds <= 3600:
+        raise NotificationError('monitor-stale threshold must be 180–3600 seconds')
+    clock = datetime.now(timezone.utc) if now is None else now
+    if not isinstance(clock, datetime) or clock.tzinfo is None or clock.utcoffset() is None:
+        raise NotificationError('monitor-liveness clock must be aware')
+    clock = clock.astimezone(timezone.utc)
+    latest = _latest_check_time(journal_path)
+    conn = _state_connection(cursor_path, create=True)
+    assert conn is not None
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS monitor_liveness (
+            id INTEGER PRIMARY KEY CHECK(id=1),
+            state TEXT NOT NULL CHECK(state IN ('Waiting','Fresh','Stale')),
+            first_seen_utc TEXT NOT NULL
+        )""")
+        row = conn.execute('SELECT state,first_seen_utc FROM monitor_liveness WHERE id=1').fetchone()
+        if row is None:
+            conn.execute('INSERT INTO monitor_liveness(id,state,first_seen_utc) VALUES(1,?,?)',
+                         ('Waiting', clock.isoformat()))
+            conn.commit()
+            return 'Waiting'
+        state = row['state']
+        if state not in ('Waiting', 'Fresh', 'Stale'):
+            raise NotificationError('unrecognized monitor-liveness state')
+        first_seen = m3._utc(row['first_seen_utc'])
+        fresh = (latest is not None and latest <= clock + timedelta(seconds=60) and
+                 latest >= clock - timedelta(seconds=stale_after_seconds))
+        if state == 'Waiting':
+            if fresh:
+                conn.execute("UPDATE monitor_liveness SET state='Fresh' WHERE id=1")
+                conn.commit()
+                return 'Fresh'
+            if clock < first_seen + timedelta(seconds=stale_after_seconds):
+                return 'Waiting'
+        new_state = 'Fresh' if fresh else 'Stale'
+        if new_state != state:
+            if new_state == 'Stale' or state == 'Stale':
+                event_type = 'MonitorStale' if new_state == 'Stale' else 'MonitorResumed'
+                deliver({'id':0, 'incident_id':0, 'event_type':event_type,
+                         'status':'Unknown' if new_state == 'Stale' else 'Healthy',
+                         'at_utc':clock.isoformat()})
+            conn.execute('UPDATE monitor_liveness SET state=? WHERE id=1', (new_state,))
+            conn.commit()
+        return new_state
+    finally:
+        conn.close()
+
 def state_status(journal_path: Path, cursor_path: Path) -> dict:
     """Read-only status: no DB creation and no network traffic."""
     conn = _state_connection(cursor_path, create=False)
@@ -292,11 +372,15 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument('--watch', action='store_true', help='explicitly opt in to webhook delivery')
     parser.add_argument('--provider', choices=('ntfy', 'discord', 'json'), default='ntfy')
     parser.add_argument('--poll-seconds', type=int, default=15)
+    parser.add_argument('--monitor-stale-seconds', type=int, default=0,
+                        help='opt in to durable monitor-liveness alerts, 180-3600 seconds; 0 disables')
     parser.add_argument('--allow-private-http', action='store_true', help='explicitly allow RFC1918 HTTP destination')
     args = parser.parse_args(argv)
     try:
         if type(args.poll_seconds) is not int or not POLL_MIN <= args.poll_seconds <= POLL_MAX:
             raise NotificationError('poll interval must be 5–300 seconds')
+        if args.monitor_stale_seconds != 0 and not 180 <= args.monitor_stale_seconds <= 3600:
+            raise NotificationError('monitor-stale threshold must be 180–3600 seconds')
         journal = m3.history_path()
         cursor = state_path(journal)
         if args.check_config:
@@ -323,6 +407,11 @@ def main(argv: list[str] | None = None) -> int:
                         print('M5: existing journal events acknowledged as baseline; watching for new incidents.', flush=True)
                     if report['sent']:
                         print('M5: {} incident notification(s) delivered.'.format(report['sent']), flush=True)
+                    if args.monitor_stale_seconds:
+                        poll_monitor_liveness(journal, cursor,
+                            lambda event: send_webhook(event, url=url, provider=args.provider,
+                                                       allow_private_http=args.allow_private_http, token=token),
+                            stale_after_seconds=args.monitor_stale_seconds)
                     time.sleep(args.poll_seconds)
                 except (NotificationError, sqlite3.Error, m3.HistoryError, OSError) as exc:
                     failures += 1

@@ -330,15 +330,40 @@ def _connect(path: Path, *, write: bool,
     return conn
 
 
+def _confirmed_streak(conn: sqlite3.Connection, *, healthy: bool,
+                      required: int, within_seconds: int | None = None) -> str | None:
+    """Return the first qualifying observation's timestamp, or None.
+
+    Read the *already inserted*, consecutively ordered samples inside the
+    same writer transaction. Do not count old observations after a restart,
+    repeated timestamps, or intervening opposite-status checks.
+    """
+    rows = conn.execute('''SELECT observed_at_utc, status FROM checks
+        ORDER BY id DESC LIMIT ?''', (required,)).fetchall()
+    if len(rows) != required:
+        return None
+    stamps = [_utc(row['observed_at_utc']) for row in reversed(rows)]
+    if any(later <= earlier for earlier, later in zip(stamps, stamps[1:])):
+        return None
+    if not all((row['status'] == 'Healthy') == healthy for row in rows):
+        return None
+    if within_seconds is not None and (stamps[-1] - stamps[0]).total_seconds() > within_seconds:
+        return None
+    return stamps[0].isoformat()
+
+
 def record_cycle(path: Path, result: dict, *,
                  authorize_commit: Callable[[], bool] | None = None,
-                 operation_id: str | None = None) -> dict:
+                 operation_id: str | None = None,
+                 confirmed_incidents: bool = False) -> dict:
     """Commit one cycle; optional release-only authorization inside transaction.
 
     This gate is a PRE-COMMIT check. It cannot prove that a disk flush which
     started before revocation finishes before the deadline. A full hard-worker
     containment and bounded-writer acceptance gate remain separately required.
     """
+    if type(confirmed_incidents) is not bool:
+        raise HistoryError('invalid incident confirmation policy')
     if operation_id is not None:
         operation_id = _operation_id(operation_id)
     if authorize_commit is not None and not callable(authorize_commit):
@@ -380,7 +405,11 @@ def record_cycle(path: Path, result: dict, *,
         event = 'NoIncident'
         incident_id = None
         if sample['status'] == 'Healthy':
-            if open_row is not None:
+            # In confirmed mode, one good reading never closes a real outage;
+            # two consecutive time-ordered healthy checks are required.
+            healthy_confirmed = (not confirmed_incidents or
+                _confirmed_streak(conn, healthy=True, required=2) is not None)
+            if open_row is not None and healthy_confirmed:
                 incident_id = open_row['id']
                 # Backward clock corrections should not fabricate negative durations.
                 resolved = max(sample['at'], open_row['started_at_utc'])
@@ -392,19 +421,30 @@ def record_cycle(path: Path, result: dict, *,
                     VALUES (?, ?, ?, ?, ?)''',
                     (incident_id, sample['at'], 'Recovered', sample['status'], sample['reason']))
                 event = 'Recovered'
+            elif open_row is not None:
+                incident_id = open_row['id']
+                event = 'Ongoing'
         elif open_row is None:
-            cur = conn.execute('''INSERT INTO incidents
-                (started_at_utc, last_observed_at_utc, initial_status, last_status,
-                 initial_reason, last_reason, windows_classification, pi_classification, check_count)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)''',
-                (sample['at'], sample['at'], sample['status'], sample['status'],
-                 sample['reason'], sample['reason'], sample['windows'], sample['pi']))
-            incident_id = cur.lastrowid
-            conn.execute('''INSERT INTO incident_events
-                (incident_id, at_utc, event_type, status, reason)
-                VALUES (?, ?, ?, ?, ?)''',
-                (incident_id, sample['at'], 'Opened', sample['status'], sample['reason']))
-            event = 'Opened'
+            # Three consecutive unhealthy results within five minutes make
+            # an incident. Transient single failures remain in check history.
+            first_unhealthy = (sample['at'] if not confirmed_incidents else
+                _confirmed_streak(conn, healthy=False, required=3,
+                                  within_seconds=300))
+            if first_unhealthy is None:
+                event = 'NoIncident'
+            else:
+                cur = conn.execute('''INSERT INTO incidents
+                    (started_at_utc, last_observed_at_utc, initial_status, last_status,
+                     initial_reason, last_reason, windows_classification, pi_classification, check_count)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)''',
+                    (first_unhealthy, sample['at'], sample['status'], sample['status'],
+                     sample['reason'], sample['reason'], sample['windows'], sample['pi']))
+                incident_id = cur.lastrowid
+                conn.execute('''INSERT INTO incident_events
+                    (incident_id, at_utc, event_type, status, reason)
+                    VALUES (?, ?, ?, ?, ?)''',
+                    (incident_id, sample['at'], 'Opened', sample['status'], sample['reason']))
+                event = 'Opened'
         else:
             incident_id = open_row['id']
             changed = (sample['status'] != open_row['last_status'] or
@@ -517,6 +557,8 @@ def main(argv: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--check-config', action='store_true', help='no checks and no store write')
     mode.add_argument('--record-live', action='store_true', help='real read-only probes + local incident history writes')
+    parser.add_argument('--confirmed-incidents', action='store_true',
+                        help='require 3 unhealthy checks in 5 minutes and 2 healthy checks to recover')
     mode.add_argument('--history', action='store_true', help='read selected isolated history, no probes')
     duration = parser.add_mutually_exclusive_group()
     duration.add_argument('--count', type=int, help='live cycles (1-20)')
@@ -524,6 +566,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--interval-seconds', type=int, default=120)
     parser.add_argument('--json', action='store_true', help='machine-readable history/report output')
     args = parser.parse_args(argv)
+    if args.confirmed_incidents and not args.record_live:
+        parser.error('--confirmed-incidents requires --record-live')
     if not args.record_live and (args.count is not None or args.continuous):
         parser.error('count/continuous may only be used with --record-live')
     if args.record_live and args.count is None and not args.continuous:
@@ -549,7 +593,7 @@ def main(argv: list[str] | None = None) -> int:
         # Use M2's same-session mutex and sequential probe loop. If journal
         # storage fails, stop rather than run unrecorded cycles.
         def on_cycle(result: dict) -> None:
-            incident = record_cycle(path, result)
+            incident = record_cycle(path, result, confirmed_incidents=args.confirmed_incidents)
             if args.json:
                 print(json.dumps({**result, 'incident': incident},
                                  sort_keys=True, separators=(',', ':'), allow_nan=False), flush=True)

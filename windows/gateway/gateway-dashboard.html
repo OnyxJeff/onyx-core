@@ -126,6 +126,12 @@ body[data-view="streaming"] #health-panel .label{font-size:.75rem}
 /* Only the gateway-served copy hides manual credentials. */
 .gateway-mode label[for="token"],.gateway-mode #token,
 .gateway-mode #connect,.gateway-mode #disconnect{display:none!important}
+/* v0.8.0 M4 is a diagnostic section, not a visual redesign. */
+#monitor-panel{display:none;margin-top:14px}
+body.monitor-enabled #monitor-panel{display:block}
+body[data-view="streaming"] #monitor-panel{display:none!important}
+#monitor-list{padding-left:18px;margin-bottom:0;color:#aebaca;font-size:.9rem}
+#monitor-list li{margin-top:6px;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -154,6 +160,14 @@ body[data-view="streaming"] #health-panel .label{font-size:.75rem}
 <div class="panel" id="cpu-temp-card"><div class="label">CPU temperature</div><div class="value" id="cpu-temp">—</div><div class="metric-sub">LibreHardwareMonitor · Tctl/Tdie</div></div>
 </section>
 <section class="panel" id="health-panel" style="margin-top:14px" aria-label="Health alerts"><div class="label">TELEMETRY HEALTH</div><div id="health-state" class="status stale">Not connected</div><p id="health-detail" aria-live="polite">Connect to check telemetry freshness.</p><p id="health-event" aria-live="polite"></p></section>
+<section class="panel" id="monitor-panel" aria-label="Windows and Raspberry Pi connectivity history">
+<div class="label">WINDOWS / PI CONNECTIVITY — v0.8</div>
+<div id="monitor-state" class="status stale" role="status">Awaiting history</div>
+<p id="monitor-detail" aria-live="polite">This section displays saved M3 checks, not a continuous connection probe.</p>
+<p id="monitor-last">No stored monitoring check yet.</p>
+<div class="label">RECENT INCIDENTS</div>
+<ul id="monitor-list"><li>No incidents recorded.</li></ul>
+</section>
 <section class="panel" id="usage-panel" style="margin-top:14px">
 <h2 style="font-size:1.1rem;margin:0">Recent usage</h2>
 <p>CPU and memory percentage · oldest to newest</p>
@@ -170,7 +184,8 @@ body[data-view="streaming"] #health-panel .label{font-size:.75rem}
 (()=>{'use strict';
 const $=id=>document.getElementById(id);
 let token='',timer=null,busy=false,previousHealth=null;
-const gatewayMode=location.origin==='http://127.0.0.1:18766';
+const gatewayMode=['http://127.0.0.1:18766','http://127.0.0.1:18767','http://127.0.0.1:18768'].includes(location.origin);
+const monitorView=gatewayMode&&['18767','18768'].includes(location.port);
 if(gatewayMode){document.documentElement.classList.add('gateway-mode');token='gateway-session';}
 const status=(text,klass)=>{$('status').textContent=text;$('status').className='status '+klass;};
 function uptime(seconds){if(!Number.isFinite(seconds))return '—';const d=Math.floor(seconds/86400),h=Math.floor(seconds%86400/3600),m=Math.floor(seconds%3600/60);return d+'d '+h+'h '+m+'m';}
@@ -326,6 +341,43 @@ showHealth('receiver_unreachable','Cannot reach the receiver; telemetry and char
 $('message').textContent='Receiver request failed; displaying last known readings and retrying on next refresh.';
 }finally{busy=false;}
 }
+// Separate polling: history must remain readable even if the Pi receiver is down.
+async function pollMonitoring(){
+ if(!monitorView)return;
+ try{
+  const response=await fetch('/api/v1/monitor/summary',{cache:'no-store'});
+  if(!response.ok)throw new Error('history_unavailable');
+  const result=await response.json();
+  const names={Healthy:['HEALTHY','ok'],Degraded:['DEGRADED','bad'],Unknown:['UNKNOWN','stale'],Stale:['STALE','stale'],NoData:['NO DATA','stale']};
+  const chosen=names[result.state]||names.Unknown;
+  $('monitor-state').textContent=chosen[0];
+  $('monitor-state').className='status '+chosen[1];
+  const last=result.latest;
+  $('monitor-detail').textContent=last?
+   'Last observed: '+last.observed_status+' · Windows: '+last.windows_classification+' · Pi: '+last.pi_classification+' · '+last.reason:
+   'No stored connectivity check. Run M3 explicitly to start recording.';
+  $('monitor-last').textContent=last?
+   'Last saved check: '+new Date(last.checked_at_utc).toLocaleString()+' ('+last.age_seconds+' seconds ago).'+
+   (result.state==='Stale'?' Monitoring is not currently verified as healthy.':''):
+   'No stored monitoring check yet.';
+  const list=$('monitor-list');list.replaceChildren();
+  if(!Array.isArray(result.incidents)||!result.incidents.length){
+   const li=document.createElement('li');li.textContent='No incidents recorded.';list.append(li);
+  }else{
+   for(const incident of result.incidents){
+    const li=document.createElement('li');
+    li.textContent='#'+incident.id+' · '+(incident.resolved_at_utc?'Recovered':'OPEN')+
+     ' · '+new Date(incident.started_at_utc).toLocaleString()+' · '+incident.last_reason+
+     ' · '+incident.check_count+' check(s)';
+    list.append(li);
+   }
+  }
+ }catch(_){
+  $('monitor-state').textContent='UNAVAILABLE';$('monitor-state').className='status bad';
+  $('monitor-detail').textContent='Cannot read M3 history. Existing telemetry monitoring is unaffected.';
+  $('monitor-last').textContent='History freshness unknown.';
+ }
+}
 $('connect').addEventListener('click',()=>{token=$('token').value;$('token').value='';if(!token){status('TOKEN REQUIRED','stale');return;}if(timer)clearInterval(timer);poll();timer=setInterval(poll,30000);});
 $('disconnect').addEventListener('click',()=>{token='';previousHealth=null;$('health-event').textContent='';showHealth('no_data','Disconnected; monitoring paused.');$('token').value='';if(timer)clearInterval(timer);timer=null;status('DISCONNECTED','stale');$('message').textContent='Token cleared from dashboard memory.';});
 // Visual layout preference only. Never persist the authentication token.
@@ -341,6 +393,10 @@ function setMode(mode){
 setMode(savedMode);
 $('viewmode').addEventListener('change',()=>setMode($('viewmode').value));
 $('range').addEventListener('change',poll);
+if(monitorView){
+ document.body.classList.add('monitor-enabled');
+ pollMonitoring();setInterval(pollMonitoring,30000);
+}
 if(gatewayMode){
  document.querySelector('.mode-note').textContent='Connected through local Windows gateway; no browser token required.';
  $('message').textContent='Connecting through local gateway…';

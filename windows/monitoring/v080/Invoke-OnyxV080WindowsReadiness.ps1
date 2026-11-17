@@ -17,6 +17,44 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# For v0.8 only: the legacy diagnostic conflates Find-NetRoute failures with
+# genuine route mismatches. This PURE helper distinguishes complete evidence
+# from missing/ambiguous evidence. It never changes a failure to Healthy.
+function Test-OnyxV080RouteSelectionEvidence {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyCollection()][object[]]$Selection,
+        [Parameter(Mandatory=$true)][string]$GatewayIP
+    )
+    $Sources = @($Selection | Where-Object {
+        $_.PSObject.Properties['IPAddress'] -and
+        $_.PSObject.Properties['InterfaceIndex'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$_.IPAddress)
+    })
+    $Routes = @($Selection | Where-Object {
+        $_.PSObject.Properties['DestinationPrefix'] -and
+        $_.PSObject.Properties['NextHop'] -and
+        $_.PSObject.Properties['InterfaceIndex'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$_.DestinationPrefix) -and
+        -not [string]::IsNullOrWhiteSpace([string]$_.NextHop)
+    })
+    # A result lacking EXACTLY one selected source and one route cannot prove
+    # an actual route mismatch. This includes incomplete low-integrity CIM
+    # results and objects whose source/route interface indexes disagree.
+    if ($Sources.Count -ne 1 -or $Routes.Count -ne 1) {
+        return 'Unavailable'
+    }
+    $Source = $Sources[0]
+    $Route = $Routes[0]
+    if ([string]$Source.InterfaceIndex -cne [string]$Route.InterfaceIndex) {
+        return 'Unavailable'
+    }
+    if ($Source.IPAddress -eq $GatewayIP -and $Route.NextHop -eq '0.0.0.0') {
+        return 'ExpectedRoute'
+    }
+    return 'ConfirmedMismatch'
+}
+
 if (-not $LiveReadOnly) {
     throw 'Explicit -LiveReadOnly required; no probe was run.'
 }
@@ -36,6 +74,27 @@ if ($null -eq $Result -or $Result -is [array] -or
     $Result.RepairAction -ne 'None' -or
     [string]::IsNullOrWhiteSpace([string]$Result.Classification)) {
     throw 'Read-only Windows diagnostic returned an invalid result.'
+}
+
+# A legacy RouteNotViaUsb can also mean its Find-NetRoute call failed.
+# Recheck with an explicitly complete, coherent OS route selection before
+# asserting a confirmed routing fault. An inaccessible, empty, ambiguous or
+# contradictory selection MUST fail closed. M1 reports this as Unknown with
+# WindowsDiagnosticUnavailable, not as a fabricated confirmed outage.
+if ($Result.Classification -eq 'RouteNotViaUsb') {
+    try {
+        $SelectedRoute = @(
+            Find-NetRoute -RemoteIPAddress $ReceiverIP -ErrorAction Stop
+        )
+    }
+    catch {
+        throw 'Windows route evidence unavailable; cannot confirm routing failure.'
+    }
+    $RouteEvidence = Test-OnyxV080RouteSelectionEvidence `
+        -Selection $SelectedRoute -GatewayIP $GatewayIP
+    if ($RouteEvidence -ne 'ConfirmedMismatch') {
+        throw 'Windows route evidence incomplete or contradictory; cannot confirm routing failure.'
+    }
 }
 
 $Summary = [ordered]@{

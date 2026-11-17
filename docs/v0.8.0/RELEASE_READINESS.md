@@ -1,3 +1,5 @@
+> **November 17, 2026 scope decision:** v0.8.0 is approved for a **code-only GitHub release**, not deployment. The operational HOLD recorded below remains active for protected installation, native host acceptance and unattended runtime. See [CODE_ONLY_RELEASE_DECISION.md](CODE_ONLY_RELEASE_DECISION.md).
+
 # ONYX CORE v0.8.0 — Pre-merge release readiness
 
 **Status:** CONDITIONAL HOLD — evidence and source review complete; protected install and real operational acceptance remain open.  

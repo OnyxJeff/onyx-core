@@ -27,6 +27,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 
 LEGACY = 'onyxcore-receiver.service'
@@ -125,6 +126,29 @@ def assert_legacy_listening():
     found = listeners()
     if len(found) != 1 or not BIND.fullmatch(found[0]):
         raise Refused('Legacy port 8765 ownership/address changed. STOP.')
+
+
+def wait_receiver_ready(role, expected, conflicting, *, attempts=12, pause_seconds=1):
+    """Bounded USB listener readiness; no service restart, journal or DB writes.
+
+    A missing socket immediately after systemctl start is transient; a wrong
+    binding, duplicate listener, failed unit or concurrent receiver is not.
+    """
+    if not 1 <= attempts <= 30 or not 0 <= pause_seconds <= 2:
+        raise ValueError('invalid bounded receiver readiness settings')
+    for attempt in range(attempts):
+        if state(conflicting)['active'] != 'inactive':
+            raise Refused(f'{role}: conflicting receiver active. STOP.')
+        if state(expected)['active'] != 'active':
+            raise Refused(f'{role}: receiver not active while awaiting socket. STOP.')
+        found = listeners()
+        if len(found) == 1 and BIND.fullmatch(found[0]):
+            return
+        if found:
+            raise Refused(f'{role}: unexpected/multiple port 8765 listeners. STOP.')
+        if attempt + 1 < attempts:
+            time.sleep(pause_seconds)
+    raise Refused(f'{role}: USB port 8765 not ready after {attempts} checks. STOP.')
 
 
 def verify_install(commit):
@@ -313,11 +337,88 @@ def activate(commit):
         raise Refused('Candidate did not start in manual-only mode')
     if state(LEGACY)['active'] != 'inactive':
         raise Refused('Legacy receiver restarted concurrently')
-    assert_candidate_listening()
+    wait_receiver_ready('Candidate', CANDIDATE, LEGACY)
     set_phase(doc, 'candidate-running-rehearsal')
     print('PASS: manual-only candidate receiver active on USB 8765; legacy guarded.')
     print('WARNING: this is a non-reboot-safe REHEARSAL; rollback before reboot.')
 
+
+
+def resume_activate(commit):
+    """Recover an interrupted manual activation without re-registering the unit.
+
+    Only the previously journaled candidate-unit-registered phase is eligible.
+    Source, guard, listener, and legacy exclusion remain mandatory.
+    """
+    doc = get_journal(commit)
+    if doc['phase'] != 'candidate-unit-registered':
+        raise Refused('No interrupted candidate activation to resume. STOP.')
+    check_dispatchers(doc)
+    if not CANDIDATE_FILE.is_file() or CANDIDATE_FILE.is_symlink():
+        raise Refused('Previously registered candidate service missing. STOP.')
+    if CANDIDATE_FILE.read_bytes() != CANDIDATE_SOURCE.read_bytes():
+        raise Refused('Candidate unit content changed. STOP.')
+    if not DROPIN.is_file() or DROPIN.is_symlink() or DROPIN.read_bytes() != DROPIN_BYTES:
+        raise Refused('Legacy rehearsal guard missing or changed. STOP.')
+    if (PERSISTENT_GUARD.exists() or PERSISTENT_GUARD.is_symlink() or
+            PERSISTENT_MARKER.exists() or PERSISTENT_MARKER.is_symlink() or
+            Path('/run/onyxcore/v090-legacy-receiver-allow').exists()):
+        raise Refused('Unexpected persistent or runtime legacy-start policy. STOP.')
+    if state(LEGACY)['active'] != 'inactive' or state(LEGACY)['enabled'] != 'disabled':
+        raise Refused('Original receiver is not excluded. STOP.')
+    candidate = state(CANDIDATE)
+    if candidate['enabled'] != 'disabled':
+        raise Refused('Candidate has unexpected boot startup. STOP.')
+    if candidate['active'] == 'inactive':
+        assert_free()
+        run('systemctl', 'start', CANDIDATE)
+    elif candidate['active'] != 'active':
+        raise Refused('Candidate state is neither active nor inactive. STOP.')
+    wait_receiver_ready('Candidate', CANDIDATE, LEGACY)
+    if state(LEGACY)['active'] != 'inactive':
+        raise Refused('Legacy receiver restarted during activation recovery. STOP.')
+    set_phase(doc, 'candidate-running-rehearsal')
+    print('PASS: previously registered manual-only candidate verified and journaled.')
+
+
+def reconcile_rollback(commit):
+    """Conclude a rollback whose original service is already demonstrably back.
+
+    Only advances private journal after complete read-only safety attestation;
+    does not start/stop services, remove guards, or touch telemetry history.
+    """
+    doc = get_journal(commit)
+    if doc['phase'] not in ('quiescing', 'legacy-quiesced',
+                            'candidate-unit-registered', 'candidate-running-rehearsal',
+                            'boot-promoting', 'candidate-boot-configured'):
+        raise Refused('No interrupted rollback to reconcile. STOP.')
+    check_dispatchers(doc)
+    no_redirects(LEGACY_FILE)
+    no_redirects(ESCROW / 'legacy-unit.service')
+    if LEGACY_FILE.read_bytes() != (ESCROW / 'legacy-unit.service').read_bytes():
+        raise Refused('Original receiver service diverged from escrow. STOP.')
+    if CANDIDATE_FILE.exists() or CANDIDATE_FILE.is_symlink():
+        no_redirects(CANDIDATE_FILE)
+        if CANDIDATE_FILE.read_bytes() != CANDIDATE_SOURCE.read_bytes():
+            raise Refused('Candidate service unit diverged. STOP.')
+    if (state(LEGACY)['active'] != 'active' or state(LEGACY)['enabled'] != 'enabled' or
+            state(CANDIDATE)['active'] != 'inactive' or state(CANDIDATE)['enabled'] != 'disabled'):
+        raise Refused('Original and candidate receiver states not fully restored. STOP.')
+    for path in (DROPIN, PERSISTENT_GUARD, PERSISTENT_MARKER,
+                 Path('/run/onyxcore/v090-legacy-receiver-allow')):
+        if path.exists() or path.is_symlink():
+            raise Refused('Unexpected legacy exclusion guard/marker remains. STOP.')
+    wait_receiver_ready('Legacy', LEGACY, CANDIDATE)
+    # ss -p and systemd MainPID confirm the original receiver actually owns
+    # the socket; a healthy-looking unrelated process must not satisfy journal.
+    main_pid = unit_property(LEGACY, 'MainPID')
+    if not main_pid.isdecimal() or int(main_pid) <= 0:
+        raise Refused('Original receiver main PID unavailable. STOP.')
+    row = run('ss', '-ltnpH', '( sport = :8765 )').stdout.splitlines()
+    if len(row) != 1 or f'pid={main_pid},' not in row[0]:
+        raise Refused('Original receiver does not own the USB socket. STOP.')
+    set_phase(doc, 'rolled-back')
+    print('PASS: original Pi receiver verified; interrupted rollback journal reconciled.')
 
 
 def promote_boot(commit):
@@ -438,14 +539,14 @@ def rollback(commit):
     run('systemctl', 'start', LEGACY)
     if state(LEGACY)['active'] != 'active' or state(CANDIDATE)['active'] == 'active':
         raise Refused('Legacy not fully restored')
-    assert_legacy_listening()
+    wait_receiver_ready('Legacy', LEGACY, CANDIDATE)
     set_phase(doc, 'rolled-back')
     print('PASS: original service restored on 8765; database and snapshot untouched.')
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--phase', choices=('preview','audit-boot','escrow','quiesce','activate','promote-boot','rollback'), default='preview')
+    parser.add_argument('--phase', choices=('preview','audit-boot','escrow','quiesce','activate','resume-activate','promote-boot','rollback','reconcile-rollback'), default='preview')
     parser.add_argument('--expected-commit', default='')
     parser.add_argument('--approve-live-pi-changes', action='store_true')
     a = parser.parse_args(argv)
@@ -467,7 +568,7 @@ def main(argv=None):
         if getattr(os, 'geteuid', lambda: -1)() != 0 or platform.machine() != 'armv6l':
             raise Refused('Live operations require root on original ARMv6 Pi')
         verify_install(a.expected_commit)
-        fn = {'escrow': escrow, 'quiesce': quiesce, 'activate': activate, 'promote-boot': promote_boot, 'rollback': rollback}[a.phase]
+        fn = {'escrow': escrow, 'quiesce': quiesce, 'activate': activate, 'resume-activate': resume_activate, 'promote-boot': promote_boot, 'rollback': rollback, 'reconcile-rollback': reconcile_rollback}[a.phase]
         fn(a.expected_commit)
         return 0
     except (OSError, ValueError, Refused, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:

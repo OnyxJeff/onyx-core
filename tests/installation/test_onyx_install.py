@@ -116,5 +116,51 @@ class TestInactiveInstaller(unittest.TestCase):
             self.assertEqual(0o755,f.stat().st_mode & 0o777)
 
 
+    def test_system_windows_acl_runs_only_after_staging_and_before_publish(self):
+        stages = []
+        def verify_stage(path):
+            self.assertTrue((path / 'manifest.json').is_file())
+            self.assertTrue((path / 'installation-receipt.json').is_file())
+            self.assertFalse(self.target.exists())
+            stages.append(path)
+        with mock.patch.object(ins, 'check_target'), \
+             mock.patch.object(ins, '_provision_windows_runtime_acl', side_effect=verify_stage):
+            result = self.call(system=True, apply=True)
+        self.assertEqual('PREPARED', result['status'])
+        self.assertEqual(1, len(stages))
+        self.assertTrue(self.target.is_dir())
+
+    def test_system_windows_acl_failure_leaves_target_unpublished(self):
+        with mock.patch.object(ins, 'check_target'), \
+             mock.patch.object(ins, '_provision_windows_runtime_acl',
+                               side_effect=ins.InstallRefused('ACL refused')) as helper:
+            with self.assertRaisesRegex(ins.InstallRefused, 'ACL refused'):
+                self.call(system=True, apply=True)
+        helper.assert_called_once()
+        self.assertFalse(self.target.exists())
+
+    def test_sandbox_does_not_touch_windows_system_acl(self):
+        with mock.patch.object(ins, '_provision_windows_runtime_acl',
+                               side_effect=AssertionError('system ACL called')):
+            self.call(apply=True)
+        self.assertTrue(self.target.is_dir())
+
+    def test_acl_helper_fails_closed_without_verified_marker(self):
+        with mock.patch.object(ins.subprocess, 'run', return_value=mock.Mock(
+            returncode=0, stdout=b'incomplete\r\n', stderr=b'')):
+            with self.assertRaises(ins.InstallRefused):
+                ins._provision_windows_runtime_acl(self.target)
+
+    def test_acl_helper_refuses_nonzero_or_timeout(self):
+        with mock.patch.object(ins.subprocess, 'run', return_value=mock.Mock(
+            returncode=1, stdout=b'ONYX_ACL_VERIFIED\n', stderr=b'')):
+            with self.assertRaises(ins.InstallRefused):
+                ins._provision_windows_runtime_acl(self.target)
+        with mock.patch.object(ins.subprocess, 'run',
+                               side_effect=ins.subprocess.TimeoutExpired('powershell', 120)):
+            with self.assertRaises(ins.InstallRefused):
+                ins._provision_windows_runtime_acl(self.target)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -15,6 +15,7 @@ import platform as host_platform
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -104,6 +105,29 @@ def _sha(path: Path) -> str:
     return h.hexdigest()
 
 
+def _provision_windows_runtime_acl(staging: Path) -> None:
+    """Fail closed before publishing a system install; never change sandbox ACLs.
+
+    The elevated installer identity is the required limited Scheduled Task identity.
+    RC2 native acceptance must verify access using its non-elevated token.
+    """
+    helper = Path(__file__).resolve().parent.parent / 'windows' / 'Set-OnyxV090InstallAcl.ps1'
+    if not helper.is_file():
+        raise InstallRefused('Windows ACL installer helper missing')
+    powershell = (Path(os.environ.get('WINDIR', r'C:\Windows')) / 'System32' /
+                  'WindowsPowerShell' / 'v1.0' / 'powershell.exe')
+    try:
+        result = subprocess.run(
+            [str(powershell), '-NoProfile', '-NonInteractive',
+             '-ExecutionPolicy', 'Bypass', '-File', str(helper),
+             '-StagingRoot', str(staging)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise InstallRefused('Windows ACL provisioning unavailable; no install published') from exc
+    if result.returncode != 0 or b'ONYX_ACL_VERIFIED' not in result.stdout.splitlines():
+        raise InstallRefused('Windows staged runtime ACL not verified; no install published')
+
+
 def prepare(archive: Path, target: Path, *, platform: str, commit: str,
             version: str, digest: str, system: bool = False, apply: bool = False,
             admin_check=_is_admin) -> dict:
@@ -154,6 +178,8 @@ def prepare(archive: Path, target: Path, *, platform: str, commit: str,
                 raise InstallRefused('staged file hash mismatch: ' + row['path'])
         if _sha(temporary / 'manifest.json') != hashlib.sha256(_json(manifest)).hexdigest():
             raise InstallRefused('staged manifest mismatch')
+        if system and platform == 'windows':
+            _provision_windows_runtime_acl(temporary)
         check_target(target, platform=platform, system=system, admin_check=admin_check)
         temporary.rename(target)  # only into a NEW version directory
         temporary = None

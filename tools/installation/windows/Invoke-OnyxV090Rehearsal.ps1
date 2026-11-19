@@ -3,7 +3,7 @@
 # No Pi access, DB access, Git writes, or protected v0.8.0 changes.
 [CmdletBinding()]
 param(
-    [ValidateSet('Preview','PreviewBoot','Escrow','Quiesce','StartCandidate','PromoteBoot','StopCandidate','RestoreLegacy')]
+    [ValidateSet('Preview','PreviewBoot','Escrow','Quiesce','StartCandidate','ResumeCandidate','PromoteBoot','StopCandidate','RestoreLegacy','ResumeLegacy','ReconcileLegacy')]
     [string]$Phase='Preview',
     [string]$ExpectedCommit='',
     [switch]$ApproveLiveWindowsChanges,
@@ -21,12 +21,12 @@ if ($Phase -in @('Preview','PreviewBoot')) {
     if (-not $ApproveLiveWindowsChanges) { throw 'A separately approved live Windows operation is required. STOP.' }
     if ($ExpectedCommit -notmatch '^[a-f0-9]{40}$') { throw 'Frozen candidate commit required. STOP.' }
 }
-if ($ConfirmCandidatePiActive -and $Phase -ne 'StartCandidate') { throw 'Pi candidate confirmation valid only for StartCandidate.' }
+if ($ConfirmCandidatePiActive -and $Phase -notin @('StartCandidate','ResumeCandidate')) { throw 'Pi candidate confirmation valid only for candidate startup.' }
 if ($ConfirmPiBootReady -and $Phase -ne 'PromoteBoot') { throw 'Pi durable boot confirmation only valid for PromoteBoot.' }
 if ($Phase -eq 'PromoteBoot' -and -not $ConfirmPiBootReady) { throw 'Pi must have passed its durable startup promotion before Windows. STOP.' }
-if ($ConfirmLegacyPiRestored -and $Phase -ne 'RestoreLegacy') { throw 'Legacy Pi confirmation valid only for RestoreLegacy.' }
-if ($Phase -eq 'StartCandidate' -and -not $ConfirmCandidatePiActive) { throw 'Candidate Pi must be verified active separately. STOP.' }
-if ($Phase -eq 'RestoreLegacy' -and -not $ConfirmLegacyPiRestored) { throw 'Legacy Pi must be restored before starting Windows legacy tasks. STOP.' }
+if ($ConfirmLegacyPiRestored -and $Phase -notin @('RestoreLegacy','ResumeLegacy','ReconcileLegacy')) { throw 'Legacy Pi confirmation valid only for legacy restoration.' }
+if ($Phase -in @('StartCandidate','ResumeCandidate') -and -not $ConfirmCandidatePiActive) { throw 'Candidate Pi must be verified active separately. STOP.' }
+if ($Phase -in @('RestoreLegacy','ResumeLegacy','ReconcileLegacy') -and -not $ConfirmLegacyPiRestored) { throw 'Legacy Pi must be restored before starting Windows legacy tasks. STOP.' }
 
 $Production='D:\github_repos\onyx-core'
 $ProductionHead='06ec81582791fc797f74ad294195d68b2023cb66'
@@ -159,6 +159,11 @@ function Assert-NoOtherCandidate {
         if ($null -ne (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)) { throw 'Candidate task already registered. STOP.' }
     }
 }
+function Get-ActualTaskTriggers([object]$Task) {
+    # PS5.1 can enumerate a null Triggers property as one null array element.
+    # A null placeholder is not a Scheduled Task trigger.
+    return @($Task.Triggers | Where-Object { $null -ne $_ })
+}
 function Assert-ExpectedCandidateTask([string]$Name,[string]$Script,[string]$Executable) {
     $task=Get-ScheduledTask -TaskName $Name -ErrorAction Stop
     if ($null -eq $task -or @($task.Actions).Count -ne 1) { throw 'Candidate task missing/multiple actions. STOP.' }
@@ -168,7 +173,7 @@ function Assert-ExpectedCandidateTask([string]$Name,[string]$Script,[string]$Exe
         [string]$action.Execute -ine $Executable -or
         [string]$task.Principal.LogonType -ne 'Interactive' -or
         [string]$task.Principal.RunLevel -ne 'Limited') { throw 'Candidate action/principal changed. STOP.' }
-    $triggers=@($task.Triggers)
+    $triggers=@(Get-ActualTaskTriggers $task)
     if ($triggers.Count -gt 1) { throw 'Unexpected candidate trigger count. STOP.' }
     if ($triggers.Count -eq 1) {
         if ([string]$triggers[0].CimClass.CimClassName -ne 'MSFT_TaskLogonTrigger') {
@@ -236,7 +241,7 @@ if ($Phase -eq 'PreviewBoot') {
         @{Name=$NewGateway;Script=$NewGatewayScript;Exe=$Pythonw}
     )) {
         $task=Assert-ExpectedCandidateTask $pair.Name $pair.Script $pair.Exe
-        if (@($task.Triggers).Count -ne 1 -or [string]$task.State -eq 'Disabled') {
+        if (@(Get-ActualTaskTriggers $task).Count -ne 1 -or [string]$task.State -eq 'Disabled') {
             throw 'Candidate startup trigger not enabled. STOP.'
         }
     }
@@ -344,6 +349,67 @@ if ($Phase -eq 'StartCandidate') {
     Write-Host 'REHEARSAL ONLY: candidate tasks have NO logon triggers; reboot durability NOT validated.'
     return
 }
+if ($Phase -eq 'ResumeCandidate') {
+    # Resume only the exact post-registration checkpoint; do not replace tasks.
+    # The Pi must be verified active independently and the Windows legacy side off.
+    if ($record.phase -cne 'candidate-registration-created') { throw 'No registered candidate activation to resume. STOP.' }
+    foreach ($name in $LegacyNames) {
+        if ([string](Get-ScheduledTask -TaskName $name -ErrorAction Stop).State -ne 'Disabled') {
+            throw 'Legacy task unexpectedly enabled during recovery. STOP.'
+        }
+    }
+    if (@(Get-MatchingProcesses $Production).Count -ne 0) { throw 'Legacy process exists during candidate recovery. STOP.' }
+    foreach ($pair in @(
+        @{Name=$NewCollector;Script=$NewLauncherScript;Exe=$Wscript},
+        @{Name=$NewGateway;Script=$NewGatewayScript;Exe=$Pythonw}
+    )) {
+        $task=Assert-ExpectedCandidateTask $pair.Name $pair.Script $pair.Exe
+        $taskId=[string]$task.Principal.UserId
+        $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        if ($taskId -ine $User -and $taskId -ine $sid) { throw 'Candidate execution identity changed. STOP.' }
+        if (@(Get-ActualTaskTriggers $task).Count -ne 0 -or [string]$task.State -eq 'Disabled') {
+            throw 'Registered candidate no longer manual-only and enabled. STOP.'
+        }
+    }
+    # Never start a second copy. A partial startup is accepted only when the
+    # already-running children belong to the exact reviewed candidate source.
+    $started=@(Get-MatchingProcesses $Candidate)
+    $gateway=@($started | Where-Object { $_.Role -eq 'gateway' })
+    $collector=@($started | Where-Object { $_.Role -eq 'collector' })
+    $launcher=@($started | Where-Object { $_.Role -eq 'launcher' })
+    if ($gateway.Count -eq 0) {
+        Assert-Port $Candidate $true
+    } else {
+        # The gateway may have launched before its loopback listener is ready;
+        # do not start another gateway in that case.
+        $listeners=@(Get-NetTCPConnection -LocalPort 18766 -State Listen -ErrorAction SilentlyContinue)
+        if ($listeners.Count -gt 0) { Assert-Port $Candidate $false }
+    }
+    if ($launcher.Count -gt 0 -and $collector.Count -eq 0) {
+        throw 'Collector launcher started without collector; do not duplicate launch. STOP.'
+    }
+    if ($gateway.Count -eq 0) { Start-ScheduledTask -TaskName $NewGateway -ErrorAction Stop }
+    if ($collector.Count -eq 0) { Start-ScheduledTask -TaskName $NewCollector -ErrorAction Stop }
+    $ok=$false
+    for ($i=0; $i -lt 12; $i++) {
+        Start-Sleep -Seconds 2
+        try {
+            $live=@(Get-MatchingProcesses $Candidate)
+            Assert-Port $Candidate $false
+            if (@($live | Where-Object { $_.Role -eq 'collector' }).Count -eq 1 -and
+                @($live | Where-Object { $_.Role -eq 'launcher' }).Count -eq 1 -and
+                @($live | Where-Object { $_.Role -eq 'gateway' }).Count -eq 1) {
+                $ok=$true
+                break
+            }
+        } catch { }
+    }
+    if (-not $ok) { throw 'Recovered candidate runtime not verified. StopCandidate remains available. STOP.' }
+    if (@(Get-MatchingProcesses $Production).Count -ne 0) { throw 'Legacy process appeared during recovery. STOP.' }
+    Set-State $record 'candidate-running-rehearsal'
+    Write-Host 'PASS: interrupted manual-only Windows candidate activation resumed and journaled.'
+    return
+}
 if ($Phase -eq 'PromoteBoot') {
     if ($record.phase -ne 'candidate-running-rehearsal') { throw 'Boot promotion requires verified rehearsal. STOP.' }
     foreach ($name in $LegacyNames) {
@@ -363,7 +429,7 @@ if ($Phase -eq 'PromoteBoot') {
         @{Name=$NewGateway;Script=$NewGatewayScript;Exe=$Pythonw}
     )) {
         $task=Assert-ExpectedCandidateTask $pair.Name $pair.Script $pair.Exe
-        if (@($task.Triggers).Count -ne 0 -or [string]$task.State -eq 'Disabled') {
+        if (@(Get-ActualTaskTriggers $task).Count -ne 0 -or [string]$task.State -eq 'Disabled') {
             throw 'Candidate task not manual-only and enabled. STOP.'
         }
     }
@@ -379,7 +445,7 @@ if ($Phase -eq 'PromoteBoot') {
         @{Name=$NewGateway;Script=$NewGatewayScript;Exe=$Pythonw}
     )) {
         $task=Assert-ExpectedCandidateTask $pair.Name $pair.Script $pair.Exe
-        if (@($task.Triggers).Count -ne 1 -or [string]$task.State -eq 'Disabled') {
+        if (@(Get-ActualTaskTriggers $task).Count -ne 1 -or [string]$task.State -eq 'Disabled') {
             throw 'Candidate logon startup was not fully registered. STOP.'
         }
     }
@@ -412,6 +478,96 @@ if ($Phase -eq 'StopCandidate') {
     # Never re-enable them during rollback; legacy owns the next logon.
     Set-State $record 'candidate-quiesced'
     Write-Host 'PASS: Windows candidate stopped; 18766 free. Restore Pi legacy next.'
+    return
+}
+if ($Phase -eq 'ResumeLegacy') {
+    # Finish only the known interrupted RestoreLegacy checkpoint. Unlike
+    # ReconcileLegacy, this phase may enable/start missing ORIGINAL tasks.
+    # No candidate task or process is ever started or re-enabled here.
+    if ($record.phase -cne 'candidate-quiesced') { throw 'No interrupted original restoration to resume. STOP.' }
+    if (@(Get-MatchingProcesses $Candidate).Count -ne 0) { throw 'Candidate process still running. STOP.' }
+    foreach ($pair in @(
+        @{Name=$NewCollector;Script=$NewLauncherScript;Exe=$Wscript},
+        @{Name=$NewGateway;Script=$NewGatewayScript;Exe=$Pythonw}
+    )) {
+        $task=Get-ScheduledTask -TaskName $pair.Name -ErrorAction SilentlyContinue
+        if ($null -ne $task) {
+            $verified=Assert-ExpectedCandidateTask $pair.Name $pair.Script $pair.Exe
+            if ([string]$verified.State -ne 'Disabled') { throw 'Candidate task unexpectedly enabled. STOP.' }
+        }
+    }
+    $running=@(Get-MatchingProcesses $Production)
+    $gateway=@($running | Where-Object { $_.Role -eq 'gateway' })
+    $collector=@($running | Where-Object { $_.Role -eq 'collector' })
+    $launcher=@($running | Where-Object { $_.Role -eq 'launcher' })
+    if ($gateway.Count -eq 0) {
+        Assert-Port $Production $true
+    } else {
+        $listeners=@(Get-NetTCPConnection -LocalPort 18766 -State Listen -ErrorAction SilentlyContinue)
+        if ($listeners.Count -gt 0) { Assert-Port $Production $false }
+    }
+    if ($launcher.Count -gt 0 -and $collector.Count -eq 0) {
+        throw 'Original launcher started without collector; do not launch twice. STOP.'
+    }
+    foreach ($name in $LegacyNames) {
+        $task=Get-ScheduledTask -TaskName $name -ErrorAction Stop
+        if ([string]$task.State -eq 'Disabled') {
+            Enable-ScheduledTask -TaskName $name -ErrorAction Stop | Out-Null
+        }
+    }
+    if ($gateway.Count -eq 0) { Start-ScheduledTask -TaskName $LegacyGateway -ErrorAction Stop }
+    if ($collector.Count -eq 0) { Start-ScheduledTask -TaskName $LegacyCollector -ErrorAction Stop }
+    $ok=$false
+    for ($i=0; $i -lt 12; $i++) {
+        Start-Sleep -Seconds 2
+        try {
+            $live=@(Get-MatchingProcesses $Production)
+            Assert-Port $Production $false
+            $ready=$true
+            foreach ($role in @('launcher','collector','gateway')) {
+                if (@($live | Where-Object { $_.Role -eq $role }).Count -ne 1) { $ready=$false }
+            }
+            if ($ready -and $live.Count -eq 3) { $ok=$true; break }
+        } catch { }
+    }
+    if (-not $ok) { throw 'Original recovery runtime not verified. Preserve escrow. STOP.' }
+    if (@(Get-MatchingProcesses $Candidate).Count -ne 0) { throw 'Candidate process appeared during recovery. STOP.' }
+    Set-State $record 'rolled-back'
+    Write-Host 'PASS: interrupted original Windows restoration resumed and journaled.'
+    return
+}
+if ($Phase -eq 'ReconcileLegacy') {
+    # Used only if RestoreLegacy already completed its OS side effects but the
+    # journal did not advance. Never enables or starts a task; only journal.
+    if ($record.phase -notin @('candidate-quiesced','quiescing')) {
+        throw 'No interrupted legacy restoration to reconcile. STOP.'
+    }
+    if (@(Get-MatchingProcesses $Candidate).Count -ne 0) { throw 'Candidate still running. STOP.' }
+    $active=@(Get-MatchingProcesses $Production)
+    foreach ($role in @('launcher','collector','gateway')) {
+        if (@($active | Where-Object { $_.Role -eq $role }).Count -ne 1) {
+            throw ('Original ' + $role + ' not uniquely running. STOP.')
+        }
+    }
+    if ($active.Count -ne 3) { throw 'Unexpected original process topology. STOP.' }
+    Assert-Port $Production $false
+    foreach ($name in $LegacyNames) {
+        if ([string](Get-ScheduledTask -TaskName $name -ErrorAction Stop).State -ne 'Running') {
+            throw 'Original Scheduled Task not running. STOP.'
+        }
+    }
+    foreach ($pair in @(
+        @{Name=$NewCollector;Script=$NewLauncherScript;Exe=$Wscript},
+        @{Name=$NewGateway;Script=$NewGatewayScript;Exe=$Pythonw}
+    )) {
+        $task=Get-ScheduledTask -TaskName $pair.Name -ErrorAction SilentlyContinue
+        if ($null -ne $task) {
+            $verified=Assert-ExpectedCandidateTask $pair.Name $pair.Script $pair.Exe
+            if ([string]$verified.State -ne 'Disabled') { throw 'Candidate task not disabled. STOP.' }
+        }
+    }
+    Set-State $record 'rolled-back'
+    Write-Host 'PASS: previously restored original Windows runtime verified; journal reconciled.'
     return
 }
 if ($Phase -eq 'RestoreLegacy') {

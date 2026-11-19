@@ -281,6 +281,13 @@ class PiTest(unittest.TestCase):
 
 
 class WindowsSourceTest(unittest.TestCase):
+    def test_windows_trigger_collections_filter_null_across_all_gates(self):
+        source = WIN.read_text(encoding='utf-8')
+        self.assertIn('function Get-ActualTaskTriggers', source)
+        self.assertIn('$Task.Triggers | Where-Object { $null -ne $_ }', source)
+        self.assertNotIn('@($task.Triggers)', source)
+        self.assertEqual(5, source.count('Get-ActualTaskTriggers $task'))
+
     def test_windows_hard_guards_in_source(self):
         source = WIN.read_text(encoding='utf-8')
         for literal in ('ApproveLiveWindowsChanges', 'ConfirmCandidatePiActive',

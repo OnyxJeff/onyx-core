@@ -1,4 +1,5 @@
 # ONYX CORE v0.9.0 — Install and recovery operator status
+> **RC2 update (2026-11-19):** This document records the earlier M3/M4 readiness state, not the current operational acceptance. RC2 native Windows/Pi installation, manual-only cutover, fresh telemetry and full rollback have since passed. See [RC2_NATIVE_ACCEPTANCE.md](RC2_NATIVE_ACCEPTANCE.md) for verified evidence and remaining reboot/logon, clean-host, and CI gates. The earlier restrictions below are preserved as historical milestone documentation.
 
 **This is an honest operator preflight, not a full installation guide yet.** The M3/M4 code can produce a new *inactive* versioned code tree from a verified artifact. It does not automatically launch the Windows collector/gateway, install the Pi systemd unit, configure Windows ICS, install credentials, or safely replace an existing receiver.
 

@@ -39,6 +39,8 @@ jobs:
           python -I -B tests/installation/test_onyx_clean_host_contract.py
           python -I -B tests/installation/test_onyx_pi_live_backup.py
           python -I -B tests/installation/test_onyx_cutover_rehearsal.py
+          python -I -B tests/installation/test_onyx_pi_readiness_rc2.py
+          python -I -B tests/installation/test_onyx_recovery_rc2.py
       - name: Two-build committed source verification
         shell: bash
         run: |
@@ -60,7 +62,10 @@ jobs:
           if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
             throw 'Windows PowerShell 5.1 required'
           }
-          $Files = Get-ChildItem -LiteralPath 'tools\installation\windows' -Recurse -File -Filter '*.ps1'
+          $Files = @(
+            Get-ChildItem -LiteralPath 'tools\installation\windows' -Recurse -File -Filter '*.ps1'
+            Get-Item -LiteralPath 'tests\installation\Test-OnyxV090WindowsTriggers.ps1'
+          )
           foreach ($File in $Files) {
             $Errors = @()
             [void][System.Management.Automation.PSParser]::Tokenize(

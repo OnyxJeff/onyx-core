@@ -1,12 +1,14 @@
 # ONYX CORE
 
-## Latest release: v0.8.0 — Continuous Monitoring & Operational Alerts
+## Latest release: v0.9.0 — Reproducible Packaging & Native Recovery
 
-**[GitHub v0.8.0 release](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.8.0)** — **code-only release**; not automatically installed on SQUALL. The installed production baseline remains **v0.7.0** until a separate protected-deployment acceptance.
+**[GitHub v0.9.0 release](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.9.0)** — published, checksum-verified Windows 11 and Raspberry Pi Zero (ARMv6) release archives. This release is **not automatically installed** on SQUALL or svr-onyxcore. The existing v0.7.0-era production runtime was restored after testing; protected v0.8.0 monitoring remains separate and was not activated by this release.
 
-v0.8.0 includes opt-in foreground, read-only USB/ICS monitoring components, incident history and receipts, a local read-only monitoring dashboard, optional notification tooling, and offline-only native evidence contracts. It does **not** start unattended monitoring, enable automatic notifications, install Scheduled Tasks, or repair ICS. Actual protected-install and native host acceptance are **not claimed**.
+v0.9.0 introduces deterministic Git-commit-pinned packages, manifest/receipt-verified versioned inactive installations, Windows runtime ACL checks, guarded Pi/Windows cutover and rollback tooling, and explicit interrupted-state recovery operations. The published archives were built from merged commit `6d73f387f37857cb3885d978baa43a44c3fbc51a`.
 
-Final SQUALL offline acceptance: **1574 tests, 11 expected skips, zero failures**, plus nine route-evidence PowerShell cases. This is host evidence, not GitHub Actions CI. See [release scope and limits](docs/v0.8.0/CODE_ONLY_RELEASE_DECISION.md).
+On SQUALL and the original ARMv6 Pi Zero, the RC2 candidate passed native inactive installation, supervised two-host activation, fresh telemetry/history/overlay checks, and rollback to original production **without manual service repairs**. The hardware-tested runtime commit is `ed41e4d0cf8049b627bc2b2613d0d231b9bb7478`; the final merge adds documentation/CI changes only. See [RC2 native acceptance](docs/v0.9.0/RC2_NATIVE_ACCEPTANCE.md).
+
+**Not yet accepted:** blank-host provisioning, unattended upgrades, native reboot/logon durability, and every interrupted-live-state recovery path. v0.9.0 is a release-engineering milestone toward v1.0.0, not a one-click installer.
 
 **USB-connected desktop telemetry companion for Windows 11 and an original Raspberry Pi Zero (ARMv6).**
 
@@ -20,6 +22,15 @@ ONYX CORE collects hardware telemetry from a Windows gaming and streaming PC ove
 
 
 ## Features
+
+### v0.9.0 reproducible release engineering (published)
+
+- Git-commit-pinned Windows and Pi ARMv6 ZIP archives with SHA-256 sidecars, source manifests, and two-build reproducibility verification.
+- Inactive versioned installation and installed-file receipt checks without overwriting the existing production tree.
+- Windows least-privilege runtime ACL verification and Pi receiver readiness checks on actual hardware.
+- Explicitly authorized, supervised Windows/Pi activation and rollback controllers; SQLite-consistent pre-cutover backup and preserved production credentials/history.
+- Manual-only RC2 rehearsal accepted on SQUALL and the Pi Zero. Reboot-safe startup promotion and fresh-machine installation remain unaccepted.
+- [Release notes](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.9.0) · [Native acceptance evidence](docs/v0.9.0/RC2_NATIVE_ACCEPTANCE.md) · [Clean-host contract](docs/v0.9.0/CLEAN_INSTALL_OPERATIONS.md).
 
 ### v0.8.0 opt-in monitoring (code-only release)
 
@@ -145,6 +156,12 @@ In v0.5.0 testing, **52 receiver**, **16 gateway**, and **7 CPU-temperature inte
 **Not yet verified:** Windows startup/reboot recovery, automatic LibreHardwareMonitor startup, and recovery following a temporary USB-network interruption.
 
 
+### v0.9.0 native acceptance and release CI
+
+The frozen RC2 runtime (`ed41e4d`) was tested on the original Pi Zero ARMv6 and SQUALL Windows 11: inactive installation, live SQLite pre-cutover backup (11,109 historical samples), manual-only candidate activation, fresh authenticated telemetry, history API, dashboard, both OBS overlay endpoints, and clean rollback. Both original hosts returned to healthy production. These tests did **not** exercise candidate reboot/logon durability or a fresh-host install.
+
+The published v0.9.0 archives were built twice from merged commit `6d73f387`, with matching platform hashes and verified archive manifests. Windows and Ubuntu GitHub Actions release-engineering jobs passed after merge. See [native acceptance](docs/v0.9.0/RC2_NATIVE_ACCEPTANCE.md) and the [v0.9.0 release](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.9.0).
+
 ### v0.5.1 validation
 
 The portrait OBS overlay has passed **25 gateway regression checks**, alongside **52 receiver regression tests** (77 checks total). The existing landscape route, new portrait route, query restrictions, and security checks passed.
@@ -179,6 +196,7 @@ For the release-readiness runner, use `windows/networking/Test-OnyxRecoveryMiles
 | **[v0.6.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.6.0)** | **USB/ICS Reliability Diagnostics — manual diagnostics, not deployed** |
 | [v0.7.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.7.0) | Protected installed production baseline on SQUALL |
 | **[v0.8.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.8.0)** | **Continuous Monitoring & Operational Alerts — code-only; protected operational acceptance pending** |
+| **[v0.9.0](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.9.0)** | **Reproducible Packaging & Native Recovery — manual-only two-host rehearsal accepted; no unattended install** |
 | v1.0.0 | Planned stable installation and maintenance baseline |
 
 See [all releases](https://github.com/OnyxJeff/onyx-core/releases) for detailed release notes.
@@ -188,7 +206,7 @@ See [all releases](https://github.com/OnyxJeff/onyx-core/releases) for detailed 
 - LibreHardwareMonitor must be running with its HTTP JSON endpoint enabled for CPU temperature collection.
 - CPU sensor endpoint/path configuration is currently reference-host-specific.
 - CPU temperature is supported by the new portrait OBS overlay in v0.5.1; the original landscape overlay remains unchanged.
-- Windows automatic startup and reboot recovery remain to be validated.
+- v0.9.0 RC2 did not validate persistent reboot/logon startup, fresh-machine provisioning, or all deliberately interrupted native recovery cases.
 - Temporary USB-network failure/reconnection recovery remains to be validated.
 - v0.6.0 reliability checks are manual and currently use an isolated development worktree and restricted Pi SSH setup. No unattended monitoring or automatic ICS repair is provided.
 - Future work includes more portable sensor discovery, overlay customization, a production-ready diagnostic installation, and a stable v1.0.0 installation/maintenance baseline.
@@ -197,11 +215,14 @@ See [all releases](https://github.com/OnyxJeff/onyx-core/releases) for detailed 
 
 See the [`docs/` directory](docs/) for operational guidance. The [USB gadget / Windows ICS troubleshooting runbook](docs/troubleshooting/usb-gadget-networking.md) covers observed environment-specific failures, read-only diagnostics, safe recovery, and rollback; it is **not** a required setup step for every installation (see [issue #10](https://github.com/OnyxJeff/onyx-core/issues/10)).
 
+For v0.9.0, consult [RC2 native acceptance](docs/v0.9.0/RC2_NATIVE_ACCEPTANCE.md), [clean-host installation scope](docs/v0.9.0/CLEAN_INSTALL_OPERATIONS.md), and the [published release notes](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.9.0).
+
 For v0.6.0, consult [release readiness](docs/v0.6.0/RELEASE_READINESS.md), [manual diagnostic operations](docs/v0.6.0/OPERATIONS.md), and [deployment/rollback planning](docs/v0.6.0/DEPLOYMENT_ROLLBACK.md).
 
 ## Project links
 
 - [Source repository](https://github.com/OnyxJeff/onyx-core)
+- [v0.9.0 release notes](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.9.0)
 - [v0.8.0 release notes](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.8.0)
 - [v0.6.0 release notes](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.6.0)
 - [v0.5.1 release notes](https://github.com/OnyxJeff/onyx-core/releases/tag/v0.5.1)

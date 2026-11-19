@@ -1,0 +1,26 @@
+[Unit]
+Description=ONYX CORE v0.9.0 USB telemetry receiver (inactive candidate)
+Wants=network-online.target
+After=NetworkManager.service network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=onyxcore
+Group=onyxcore
+EnvironmentFile=/etc/onyxcore/receiver.env
+ExecStart=/opt/onyxcore/v0.9.0/tools/installation/pi/launch-onyx-v090-receiver.sh
+Restart=on-failure
+RestartSec=15
+UMask=0077
+WorkingDirectory=/var/lib/onyxcore
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/onyxcore
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

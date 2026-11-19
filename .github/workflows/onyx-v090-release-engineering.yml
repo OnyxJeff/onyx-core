@@ -1,0 +1,74 @@
+name: ONYX CORE v0.9 release engineering (offline)
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'feature/v0.9.0-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-package-and-install-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Targeted, offline release engineering suites
+        shell: bash
+        run: |
+          set -eu
+          python -I -B tools/release/test_onyx_release.py
+          python -I -B tests/installation/test_onyx_stage.py
+          python -I -B tests/installation/test_onyx_install.py
+          python -I -B tests/installation/test_onyx_backup.py
+          python -I -B tests/installation/test_onyx_runtime_plan.py
+          python -I -B tests/installation/test_onyx_m4_integration.py
+          python -I -B tests/installation/test_onyx_cleanup_report.py
+          python -I -B tests/installation/test_onyx_candidate_verify.py
+          python -I -B tests/installation/test_onyx_clean_host_contract.py
+          python -I -B tests/installation/test_onyx_pi_live_backup.py
+          python -I -B tests/installation/test_onyx_cutover_rehearsal.py
+          python -I -B tests/installation/test_onyx_pi_readiness_rc2.py
+          python -I -B tests/installation/test_onyx_recovery_rc2.py
+      - name: Two-build committed source verification
+        shell: bash
+        run: |
+          set -eu
+          python -I -B tools/release/onyx_candidate_verify.py \
+            --repo . --commit "$GITHUB_SHA" --version 0.9.0-ci
+      - name: Pi POSIX shell syntax (no Pi activation)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -eu
+          for s in tools/installation/pi/*.sh pi/services/receiver/*.sh; do
+            sh -n "$s"
+          done
+      - name: Windows PowerShell 5.1 parse only (no execution)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSVersion.Minor -ne 1) {
+            throw 'Windows PowerShell 5.1 required'
+          }
+          $Files = @(
+            Get-ChildItem -LiteralPath 'tools\installation\windows' -Recurse -File -Filter '*.ps1'
+            Get-Item -LiteralPath 'tests\installation\Test-OnyxV090WindowsTriggers.ps1'
+          )
+          foreach ($File in $Files) {
+            $Errors = @()
+            [void][System.Management.Automation.PSParser]::Tokenize(
+              [IO.File]::ReadAllText($File.FullName), [ref]$Errors)
+            if ($null -ne $Errors -and @($Errors).Count -gt 0) { throw ('PowerShell parse failed: ' + $File.FullName) }
+          }

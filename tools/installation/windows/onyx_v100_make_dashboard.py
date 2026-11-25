@@ -10,6 +10,22 @@ EXPECTED_LEGACY_SHA256 = '72465bc34f5bfcd41f6e67f5ad0740cf692afd2a0580b98bdcb4da
 
 REPLACEMENTS = (
     (
+        "const monitorView=gatewayMode&&['18767','18768'].includes(location.port);",
+        "const monitorView=gatewayMode;",
+    ),
+    (
+        "  if(!response.ok)throw new Error('history_unavailable');",
+        "  if(response.status===404){document.body.classList.remove('monitor-enabled');return;}\n  document.body.classList.add('monitor-enabled');\n  if(!response.ok)throw new Error('history_unavailable');",
+    ),
+    (
+        " document.body.classList.add('monitor-enabled');\n pollMonitoring();",
+        " // The endpoint decides whether the monitoring panel is available.\n pollMonitoring();",
+    ),
+    (
+        "No stored connectivity check. Run M3 explicitly to start recording.",
+        "No stored connectivity check. The monitoring view does not start probes.",
+    ),
+    (
         "<title>ONYX CORE | SQUALL telemetry — v0.5.0 Phase 3F</title>",
         "<title>ONYX CORE | USB telemetry — v1.0.0</title>",
     ),

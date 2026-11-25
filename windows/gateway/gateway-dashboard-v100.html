@@ -185,7 +185,7 @@ body[data-view="streaming"] #monitor-panel{display:none!important}
 const $=id=>document.getElementById(id);
 let token='',timer=null,busy=false,previousHealth=null;
 const gatewayMode=location.protocol==='http:'&&location.hostname==='127.0.0.1';
-const monitorView=gatewayMode&&['18767','18768'].includes(location.port);
+const monitorView=gatewayMode;
 if(gatewayMode){document.documentElement.classList.add('gateway-mode');token='gateway-session';}
 const status=(text,klass)=>{$('status').textContent=text;$('status').className='status '+klass;};
 function uptime(seconds){if(!Number.isFinite(seconds))return '—';const d=Math.floor(seconds/86400),h=Math.floor(seconds%86400/3600),m=Math.floor(seconds%3600/60);return d+'d '+h+'h '+m+'m';}
@@ -346,6 +346,8 @@ async function pollMonitoring(){
  if(!monitorView)return;
  try{
   const response=await fetch('/api/v1/monitor/summary',{cache:'no-store'});
+  if(response.status===404){document.body.classList.remove('monitor-enabled');return;}
+  document.body.classList.add('monitor-enabled');
   if(!response.ok)throw new Error('history_unavailable');
   const result=await response.json();
   const names={Healthy:['HEALTHY','ok'],Degraded:['DEGRADED','bad'],Unknown:['UNKNOWN','stale'],Stale:['STALE','stale'],NoData:['NO DATA','stale']};
@@ -355,7 +357,7 @@ async function pollMonitoring(){
   const last=result.latest;
   $('monitor-detail').textContent=last?
    'Last observed: '+last.observed_status+' · Windows: '+last.windows_classification+' · Pi: '+last.pi_classification+' · '+last.reason:
-   'No stored connectivity check. Run M3 explicitly to start recording.';
+   'No stored connectivity check. The monitoring view does not start probes.';
   $('monitor-last').textContent=last?
    'Last saved check: '+new Date(last.checked_at_utc).toLocaleString()+' ('+last.age_seconds+' seconds ago).'+
    (result.state==='Stale'?' Monitoring is not currently verified as healthy.':''):
@@ -394,7 +396,7 @@ setMode(savedMode);
 $('viewmode').addEventListener('change',()=>setMode($('viewmode').value));
 $('range').addEventListener('change',poll);
 if(monitorView){
- document.body.classList.add('monitor-enabled');
+ // The endpoint decides whether the monitoring panel is available.
  pollMonitoring();setInterval(pollMonitoring,30000);
 }
 if(gatewayMode){

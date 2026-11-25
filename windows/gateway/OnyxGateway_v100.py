@@ -71,9 +71,9 @@ class Gateway(http.server.BaseHTTPRequestHandler):
             return self.send_bytes(200, self.server.overlay, 'text/html; charset=utf-8', html=True)
         if parsed.path in ('/overlay-portrait', '/overlay-portrait/') and not parsed.query:
             return self.send_bytes(200, self.server.overlay_portrait, 'text/html; charset=utf-8', html=True)
-        # M4 development-only local incident history; never sent to the Pi.
+        # Explicit v100 local incident history; never sent to the Pi.
         if parsed.path == '/api/v1/monitor/summary':
-            if not self.server.v080_monitor_view:
+            if not self.server.v100_monitor_view:
                 return self.error(404, 'not_found')
             if parsed.query:
                 return self.error(400, 'invalid_query')
@@ -131,16 +131,13 @@ def main():
     p.add_argument('--receiver-port', type=int, required=True)
     p.add_argument('--port', type=int, default=18766)
     p.add_argument('--load-dpapi', action='store_true', help='Read protected token via local Windows PowerShell helper')
-    p.add_argument('--v080-monitor-view', action='store_true',
-                   help='Opt in to local v0.8 incident history (read-only); release port 18768 requires release profile')
+    p.add_argument('--v100-monitor-view', action='store_true',
+                   help='Opt in to isolated v1.0.0 incident history (read-only)')
     args = p.parse_args()
-    if args.v080_monitor_view and args.port == 18766:
-        p.error('Monitoring view must not run on protected production port 18766')
+    if args.v100_monitor_view and args.port in (18766, 18767, 18768):
+        p.error('Monitoring view must not use a legacy reserved gateway port')
     if args.port == 18768:
-        if not args.v080_monitor_view:
-            p.error('Release dashboard port 18768 requires explicit --v080-monitor-view')
-        if os.environ.get('ONYXCORE_V080_STORAGE_PROFILE') != 'release':
-            p.error('Release dashboard port 18768 requires the release storage profile')
+        p.error('Legacy release gateway port is reserved')
     if not re.fullmatch(r'[A-Za-z0-9.-]{1,253}', args.receiver):
         p.error('receiver must be a hostname or IPv4 address')
     if not 1024 <= args.port <= 65535:
@@ -197,9 +194,9 @@ def main():
     server.overlay = overlay
     server.overlay_portrait = portrait
     server.token = token
-    server.v080_monitor_view = args.v080_monitor_view
-    if args.v080_monitor_view:
-        from OnyxMonitoringView import snapshot
+    server.v100_monitor_view = args.v100_monitor_view
+    if args.v100_monitor_view:
+        from OnyxV100MonitoringView import snapshot
         server.monitor_reader = snapshot
     server.upstream = f'http://{args.receiver}:{args.receiver_port}'
     server.opener = opener

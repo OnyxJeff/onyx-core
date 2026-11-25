@@ -116,6 +116,39 @@ def transform_gateway(src: str) -> str:
     return src
 
 
+
+def transform_gateway_monitoring(src: str) -> str:
+    """Use only the isolated v100 reader, never the old default storage profile."""
+    old = """    p.add_argument('--v080-monitor-view', action='store_true',
+                   help='Opt in to local v0.8 incident history (read-only); release port 18768 requires release profile')
+    args = p.parse_args()
+    if args.v080_monitor_view and args.port == 18766:
+        p.error('Monitoring view must not run on protected production port 18766')
+    if args.port == 18768:
+        if not args.v080_monitor_view:
+            p.error('Release dashboard port 18768 requires explicit --v080-monitor-view')
+        if os.environ.get('ONYXCORE_V080_STORAGE_PROFILE') != 'release':
+            p.error('Release dashboard port 18768 requires the release storage profile')"""
+    new = """    p.add_argument('--v100-monitor-view', action='store_true',
+                   help='Opt in to isolated v1.0.0 incident history (read-only)')
+    args = p.parse_args()
+    if args.v100_monitor_view and args.port in (18766, 18767, 18768):
+        p.error('Monitoring view must not use a legacy reserved gateway port')
+    if args.port == 18768:
+        p.error('Legacy release gateway port is reserved')"""
+    src = _one(src, old, new, 'monitoring CLI and legacy port guards')
+    src = _one(src, '        # M4 development-only local incident history; never sent to the Pi.',
+                    '        # Explicit v100 local incident history; never sent to the Pi.', 'monitoring route comment')
+    src = _one(src, '            if not self.server.v080_monitor_view:',
+                    '            if not self.server.v100_monitor_view:', 'monitoring route opt-in')
+    src = _one(src, '    server.v080_monitor_view = args.v080_monitor_view\n    if args.v080_monitor_view:\n        from OnyxMonitoringView import snapshot',
+                    '    server.v100_monitor_view = args.v100_monitor_view\n    if args.v100_monitor_view:\n        from OnyxV100MonitoringView import snapshot', 'isolated monitoring reader')
+    if 'v080_monitor_view' in src or 'OnyxMonitoringView import' in src:
+        raise GenerationRefused('Legacy monitoring reader remains in versioned gateway')
+    compile(src, 'OnyxGateway_v100.py', 'exec')
+    return src
+
+
 def _no_redirect(path: Path):
     for part in (path, *path.parents):
         if part.is_symlink() or (hasattr(part, 'is_junction') and part.is_junction()):
@@ -138,7 +171,8 @@ def build(kind: str, source: Path, output: Path) -> str:
     if blob_sha(raw) != expected_blob:
         raise GenerationRefused('Frozen Git source fingerprint mismatch')
     text = raw.decode('utf-8-sig')
-    result = transform_collector(text) if kind == 'collector' else transform_gateway(text)
+    result = (transform_collector(text) if kind == 'collector' else
+              transform_gateway_monitoring(transform_gateway(text)))
     content = result.encode('utf-8-sig') if kind == 'collector' else result.encode('utf-8')
     try:
         with output.open('xb') as handle:

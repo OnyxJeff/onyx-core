@@ -104,7 +104,7 @@ class IntegratedStore:
         with self.lock:
             boundary = self.history.boundary()
             stamp = boundary['timestamp_utc'] if boundary else None
-        return evaluate_health(stamp, now=now)
+        return evaluate_health(stamp, now=now, future_tolerance_seconds=5)
 
     def close(self):
         with self.lock:

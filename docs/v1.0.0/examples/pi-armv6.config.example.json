@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "platform": "pi-armv6",
+  "receiver": {
+    "interface": "usb0",
+    "port": 8765,
+    "ipv4_subnet": "192.168.137.0/24",
+    "source": "MyWindowsPC"
+  },
+  "storage": {
+    "state_dir": "/var/lib/onyxcore",
+    "history_name": "telemetry.db",
+    "snapshot_name": "latest-snapshot.json"
+  }
+}

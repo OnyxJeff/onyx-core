@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "platform": "windows",
+  "receiver": {
+    "host": "onyxpi.local",
+    "port": 8765
+  },
+  "collector": {
+    "source": "MyWindowsPC",
+    "network_adapter": "Ethernet",
+    "interval_seconds": 30
+  },
+  "usb": {
+    "adapter_name": "USB Ethernet"
+  },
+  "gateway": {
+    "listen_host": "127.0.0.1",
+    "port": 18766
+  },
+  "cpu_temperature": {
+    "enabled": false
+  }
+}

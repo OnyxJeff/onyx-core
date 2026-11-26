@@ -9,12 +9,15 @@ WARNING_AFTER_SECONDS = 90
 CRITICAL_AFTER_SECONDS = 180
 
 
-def evaluate_health(last_sample_utc, *, now=None):
+def evaluate_health(last_sample_utc, *, now=None, future_tolerance_seconds=0):
     """Return a health summary based on the last committed sample timestamp.
 
     last_sample_utc: UTC RFC3339 timestamp ending in Z, or None for no data.
     now: injectable timezone-aware datetime for deterministic tests.
     """
+    # The legacy evaluator remains strict unless a versioned caller opts in.
+    if type(future_tolerance_seconds) is not int or not 0 <= future_tolerance_seconds <= 5:
+        raise ValueError("future tolerance must be an integer in 0..5 seconds")
     current = datetime.now(timezone.utc) if now is None else now
     if not isinstance(current, datetime) or current.tzinfo is None:
         raise ValueError("now must be timezone aware")
@@ -39,8 +42,11 @@ def evaluate_health(last_sample_utc, *, now=None):
     if timestamp.utcoffset() is None:
         return result
     age = (current - timestamp).total_seconds()
-    if age < 0:
+    if age < -future_tolerance_seconds:
         result.update(reason="sample_in_future")
+        return result
+    if age < 0:
+        result.update(status="healthy", reason="telemetry_fresh_clock_skew", age_seconds=0)
         return result
     # Truncate to integer seconds for a stable, compact API response.
     result["age_seconds"] = int(age)
